@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "radiomics-toolkit"
+version = "0.1.0"
+description = "A from-scratch Python radiomics feature extraction toolkit"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+keywords = ["radiomics", "medical imaging", "DICOM", "feature extraction"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Medical Science Apps.",
+]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-image>=0.21",
+    "pydicom>=2.4",
+    "Pillow>=10.0",
+    "pandas>=2.0",
+    "click>=8.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+radiomics = "radiomics_toolkit.cli:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["radiomics_toolkit*"]

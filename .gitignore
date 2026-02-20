@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+out.csv
+out.json
+tests/fixtures/
+.pytest_cache/
+*.pyc
