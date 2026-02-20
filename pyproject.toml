@@ -29,6 +29,10 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+web = ["fastapi>=0.100", "uvicorn>=0.23", "python-multipart>=0.0.6"]
+
+[tool.setuptools.package-data]
+"radiomics_toolkit" = ["static/*"]
 
 [project.scripts]
 radiomics = "radiomics_toolkit.cli:cli"

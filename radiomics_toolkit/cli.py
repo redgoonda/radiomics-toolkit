@@ -84,5 +84,16 @@ def extract_cmd(
         sys.exit(1)
 
 
+@cli.command("serve")
+@click.option("--host", default="127.0.0.1", show_default=True, help="Host to bind.")
+@click.option("--port", default=8000, show_default=True, type=int, help="Port to listen on.")
+@click.option("--reload", is_flag=True, default=False, help="Enable auto-reload (dev mode).")
+def serve_cmd(host: str, port: int, reload: bool) -> None:
+    """Launch the web UI."""
+    from .web import main as _serve
+    click.echo(f"Starting Radiomics Toolkit UI at http://{host}:{port}")
+    _serve(host=host, port=port, reload=reload)
+
+
 if __name__ == "__main__":
     cli()

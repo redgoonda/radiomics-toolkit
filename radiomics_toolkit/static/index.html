@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Radiomics Toolkit</title>
+<style>
+  /* ── Reset & base ─────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #0f1117;
+    --surface:  #1a1d27;
+    --surface2: #22263a;
+    --border:   #2e3350;
+    --accent:   #5b8dee;
+    --accent2:  #7c5ce0;
+    --success:  #2ecc71;
+    --danger:   #e74c3c;
+    --text:     #e2e8f0;
+    --muted:    #7a8299;
+    --radius:   8px;
+    --font:     'Inter', system-ui, sans-serif;
+  }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* ── Top bar ─────────────────────────────────────────────── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 24px;
+    height: 52px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  header .logo { font-size: 20px; }
+
+  header h1 {
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    flex: 1;
+  }
+
+  header .badge {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 100px;
+    color: var(--muted);
+  }
+
+  /* ── Two-panel layout ────────────────────────────────────── */
+  .layout {
+    display: grid;
+    grid-template-columns: 260px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left panel ──────────────────────────────────────────── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    padding: 20px 16px;
+    gap: 20px;
+  }
+
+  .section-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  /* File drop zones */
+  .drop-zone {
+    border: 2px dashed var(--border);
+    border-radius: var(--radius);
+    padding: 14px 10px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+    position: relative;
+  }
+
+  .drop-zone:hover, .drop-zone.drag-over {
+    border-color: var(--accent);
+    background: rgba(91,141,238,.07);
+  }
+
+  .drop-zone input[type=file] {
+    position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%;
+  }
+
+  .drop-zone .dz-icon { font-size: 22px; margin-bottom: 4px; }
+  .drop-zone .dz-label { font-size: 12px; color: var(--muted); }
+  .drop-zone .dz-name {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--accent);
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Controls */
+  .control-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .control-row label { font-size: 13px; color: var(--text); }
+
+  input[type=range] {
+    flex: 1;
+    accent-color: var(--accent);
+  }
+
+  .bins-val {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    min-width: 28px;
+    text-align: right;
+  }
+
+  /* Toggle switch */
+  .toggle { position: relative; display: inline-block; width: 36px; height: 20px; }
+  .toggle input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; inset: 0;
+    background: var(--border);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: background .2s;
+  }
+  .toggle-slider::before {
+    content: '';
+    position: absolute;
+    width: 14px; height: 14px;
+    left: 3px; top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: transform .2s;
+  }
+  .toggle input:checked + .toggle-slider { background: var(--accent); }
+  .toggle input:checked + .toggle-slider::before { transform: translateX(16px); }
+
+  /* Feature class checkboxes */
+  .class-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px;
+  }
+
+  .class-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 8px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    cursor: pointer;
+    font-size: 12px;
+    transition: border-color .15s, background .15s;
+    user-select: none;
+  }
+
+  .class-chip input { display: none; }
+
+  .class-chip.checked {
+    border-color: var(--accent);
+    background: rgba(91,141,238,.12);
+    color: var(--accent);
+  }
+
+  .class-chip .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    flex-shrink: 0;
+  }
+
+  .class-chip.checked .dot { background: currentColor; }
+
+  /* Extract button */
+  .btn-extract {
+    width: 100%;
+    padding: 11px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: white;
+    border: none;
+    border-radius: var(--radius);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .2s, transform .1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .btn-extract:hover { opacity: .9; }
+  .btn-extract:active { transform: scale(.98); }
+  .btn-extract:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* ── Right panel ─────────────────────────────────────────── */
+  .main {
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+
+  .top-strip {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+    padding: 16px;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  /* Image preview */
+  .preview-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .preview-card .card-head {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 8px 12px 0;
+  }
+
+  .preview-card .img-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 120px;
+    padding: 8px;
+  }
+
+  .preview-card img {
+    max-width: 100%;
+    max-height: 140px;
+    border-radius: 4px;
+    display: none;
+  }
+
+  .preview-card .placeholder {
+    color: var(--muted);
+    font-size: 12px;
+    text-align: center;
+  }
+
+  .preview-card .img-meta {
+    font-size: 11px;
+    color: var(--muted);
+    padding: 0 12px 8px;
+  }
+
+  /* Stats strip */
+  .stats-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+    gap: 10px;
+    align-content: start;
+  }
+
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+  }
+
+  .stat-card .stat-label {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+
+  .stat-card .stat-value {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+
+  .stat-card .stat-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  /* ── Results panel ───────────────────────────────────────── */
+  .results-panel {
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  /* Empty state */
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100%;
+    gap: 10px;
+    color: var(--muted);
+  }
+
+  .empty-state .empty-icon { font-size: 48px; opacity: .4; }
+  .empty-state p { font-size: 14px; }
+
+  /* Loading spinner */
+  .spinner {
+    display: none;
+    width: 28px; height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Feature class accordion */
+  .feat-group {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .feat-group-head {
+    display: flex;
+    align-items: center;
+    padding: 10px 14px;
+    cursor: pointer;
+    user-select: none;
+    gap: 10px;
+    border-bottom: 1px solid transparent;
+    transition: background .15s;
+  }
+
+  .feat-group-head:hover { background: rgba(255,255,255,.03); }
+
+  .feat-group.open .feat-group-head { border-bottom-color: var(--border); }
+
+  .feat-group-head .fg-name {
+    font-size: 13px;
+    font-weight: 600;
+    flex: 1;
+  }
+
+  .feat-group-head .fg-count {
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--surface);
+    padding: 2px 7px;
+    border-radius: 100px;
+  }
+
+  .feat-group-head .fg-arrow {
+    color: var(--muted);
+    transition: transform .2s;
+    font-size: 12px;
+  }
+
+  .feat-group.open .fg-arrow { transform: rotate(90deg); }
+
+  .feat-table {
+    display: none;
+    padding: 8px 0;
+  }
+
+  .feat-group.open .feat-table { display: block; }
+
+  .feat-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    align-items: center;
+    padding: 5px 14px;
+    font-size: 12.5px;
+    transition: background .1s;
+  }
+
+  .feat-row:hover { background: rgba(255,255,255,.03); }
+
+  .feat-row .feat-name { color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+  .feat-row .feat-val  { font-weight: 600; font-family: 'JetBrains Mono', monospace; color: var(--text); }
+  .feat-row .feat-val.null { color: var(--muted); font-style: italic; }
+
+  /* Download bar */
+  .download-bar {
+    display: none;
+    gap: 10px;
+  }
+
+  .download-bar.visible { display: flex; }
+
+  .btn-dl {
+    flex: 1;
+    padding: 9px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .btn-dl:hover { border-color: var(--accent); background: rgba(91,141,238,.1); }
+
+  /* Error banner */
+  .error-banner {
+    display: none;
+    background: rgba(231,76,60,.15);
+    border: 1px solid rgba(231,76,60,.4);
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    font-size: 13px;
+    color: #f08080;
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+  /* Class colour accents */
+  .fg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .c-firstorder { background: #5b8dee; }
+  .c-shape       { background: #7c5ce0; }
+  .c-glcm        { background: #00cec9; }
+  .c-glrlm       { background: #fd79a8; }
+  .c-glszm       { background: #fdcb6e; }
+  .c-ngtdm       { background: #55efc4; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────── -->
+<header>
+  <span class="logo">🔬</span>
+  <h1>Radiomics Toolkit</h1>
+  <span class="badge">v0.1.0</span>
+</header>
+
+<!-- ── Layout ──────────────────────────────────────────────── -->
+<div class="layout">
+
+  <!-- Left sidebar -->
+  <aside class="sidebar">
+
+    <!-- Image upload -->
+    <div>
+      <div class="section-label">Image</div>
+      <div class="drop-zone" id="dzImage">
+        <input type="file" id="fileImage" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy" />
+        <div class="dz-icon">🖼</div>
+        <div class="dz-label">Drop or click to upload</div>
+        <div class="dz-label">PNG · JPEG · TIFF · DICOM</div>
+        <div class="dz-name" id="imgName"></div>
+      </div>
+    </div>
+
+    <!-- Mask upload -->
+    <div>
+      <div class="section-label">Mask <span style="color:var(--muted);text-transform:none;font-weight:400;font-size:10px">(optional)</span></div>
+      <div class="drop-zone" id="dzMask">
+        <input type="file" id="fileMask" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy" />
+        <div class="dz-icon">🎭</div>
+        <div class="dz-label">Drop or click to upload</div>
+        <div class="dz-name" id="maskName"></div>
+      </div>
+    </div>
+
+    <!-- Bins -->
+    <div>
+      <div class="section-label">Grey-level bins</div>
+      <div class="control-row">
+        <input type="range" id="binsSlider" min="8" max="256" step="8" value="64" />
+        <span class="bins-val" id="binsVal">64</span>
+      </div>
+    </div>
+
+    <!-- Normalize -->
+    <div class="control-row">
+      <label for="normalizeToggle">Normalize intensity</label>
+      <label class="toggle">
+        <input type="checkbox" id="normalizeToggle" />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <!-- Feature classes -->
+    <div>
+      <div class="section-label">Feature classes</div>
+      <div class="class-grid" id="classGrid">
+        <label class="class-chip checked" data-class="first_order">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          first_order
+        </label>
+        <label class="class-chip checked" data-class="shape">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          shape
+        </label>
+        <label class="class-chip checked" data-class="glcm">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          glcm
+        </label>
+        <label class="class-chip checked" data-class="glrlm">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          glrlm
+        </label>
+        <label class="class-chip checked" data-class="glszm">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          glszm
+        </label>
+        <label class="class-chip checked" data-class="ngtdm">
+          <input type="checkbox" checked />
+          <span class="dot"></span>
+          ngtdm
+        </label>
+      </div>
+    </div>
+
+    <!-- Extract button -->
+    <button class="btn-extract" id="btnExtract" disabled>
+      <span id="btnIcon">⚡</span>
+      <span id="btnLabel">Extract Features</span>
+      <div class="spinner" id="btnSpinner"></div>
+    </button>
+
+  </aside>
+
+  <!-- Right main area -->
+  <div class="main">
+
+    <!-- Top strip: preview + stat cards -->
+    <div class="top-strip">
+
+      <div class="preview-card">
+        <div class="card-head">Preview</div>
+        <div class="img-wrap">
+          <img id="imgPreview" alt="preview" />
+          <div class="placeholder" id="previewPlaceholder">No image loaded</div>
+        </div>
+        <div class="img-meta" id="imgMeta"></div>
+      </div>
+
+      <div class="stats-strip" id="statsStrip">
+        <div class="stat-card">
+          <div class="stat-label">Features</div>
+          <div class="stat-value" id="statFeatures">—</div>
+          <div class="stat-sub">extracted</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Classes</div>
+          <div class="stat-value" id="statClasses">—</div>
+          <div class="stat-sub">active</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Finite</div>
+          <div class="stat-value" id="statFinite">—</div>
+          <div class="stat-sub">values</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Bins</div>
+          <div class="stat-value" id="statBins">—</div>
+          <div class="stat-sub">grey levels</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Results -->
+    <div class="results-panel" id="resultsPanel">
+
+      <div class="empty-state" id="emptyState">
+        <div class="empty-icon">📊</div>
+        <p>Upload an image and click <strong>Extract Features</strong></p>
+      </div>
+
+      <div class="error-banner" id="errorBanner"></div>
+
+      <div class="download-bar" id="downloadBar">
+        <button class="btn-dl" id="btnCSV">⬇ Download CSV</button>
+        <button class="btn-dl" id="btnJSON">⬇ Download JSON</button>
+      </div>
+
+      <div id="featureGroups"></div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let lastResults = null;
+
+const CLASS_COLORS = {
+  firstorder: '#5b8dee',
+  shape:      '#7c5ce0',
+  glcm:       '#00cec9',
+  glrlm:      '#fd79a8',
+  glszm:      '#fdcb6e',
+  ngtdm:      '#55efc4',
+};
+
+// ── DOM refs ───────────────────────────────────────────────────────────────
+const fileImage      = document.getElementById('fileImage');
+const fileMask       = document.getElementById('fileMask');
+const imgName        = document.getElementById('imgName');
+const maskName       = document.getElementById('maskName');
+const binsSlider     = document.getElementById('binsSlider');
+const binsVal        = document.getElementById('binsVal');
+const normalizeToggle= document.getElementById('normalizeToggle');
+const btnExtract     = document.getElementById('btnExtract');
+const btnIcon        = document.getElementById('btnIcon');
+const btnLabel       = document.getElementById('btnLabel');
+const btnSpinner     = document.getElementById('btnSpinner');
+const imgPreview     = document.getElementById('imgPreview');
+const previewPlaceholder = document.getElementById('previewPlaceholder');
+const imgMeta        = document.getElementById('imgMeta');
+const emptyState     = document.getElementById('emptyState');
+const errorBanner    = document.getElementById('errorBanner');
+const featureGroups  = document.getElementById('featureGroups');
+const downloadBar    = document.getElementById('downloadBar');
+const statFeatures   = document.getElementById('statFeatures');
+const statClasses    = document.getElementById('statClasses');
+const statFinite     = document.getElementById('statFinite');
+const statBins       = document.getElementById('statBins');
+const classGrid      = document.getElementById('classGrid');
+
+// ── File inputs ────────────────────────────────────────────────────────────
+fileImage.addEventListener('change', () => {
+  const f = fileImage.files[0];
+  if (!f) return;
+  imgName.textContent = f.name;
+  btnExtract.disabled = false;
+  loadPreview(f);
+});
+
+fileMask.addEventListener('change', () => {
+  const f = fileMask.files[0];
+  maskName.textContent = f ? f.name : '';
+});
+
+// Drag-over highlight
+['dzImage', 'dzMask'].forEach(id => {
+  const el = document.getElementById(id);
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
+  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+  el.addEventListener('drop', () => el.classList.remove('drag-over'));
+});
+
+// ── Bins slider ────────────────────────────────────────────────────────────
+binsSlider.addEventListener('input', () => { binsVal.textContent = binsSlider.value; });
+
+// ── Class chip toggles ─────────────────────────────────────────────────────
+classGrid.querySelectorAll('.class-chip').forEach(chip => {
+  chip.addEventListener('click', () => {
+    const cb = chip.querySelector('input');
+    cb.checked = !cb.checked;
+    chip.classList.toggle('checked', cb.checked);
+  });
+});
+
+// ── Image preview ──────────────────────────────────────────────────────────
+async function loadPreview(file) {
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const res = await fetch('/preview', { method: 'POST', body: fd });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    imgPreview.src = URL.createObjectURL(blob);
+    imgPreview.style.display = 'block';
+    previewPlaceholder.style.display = 'none';
+    imgMeta.textContent = `${file.name}  ·  ${(file.size / 1024).toFixed(1)} KB`;
+  } catch (_) { /* preview is optional */ }
+}
+
+// ── Extract ────────────────────────────────────────────────────────────────
+btnExtract.addEventListener('click', async () => {
+  if (!fileImage.files[0]) return;
+
+  // Collect selected classes
+  const classes = [];
+  classGrid.querySelectorAll('.class-chip.checked').forEach(chip => {
+    classes.push(chip.dataset.class);
+  });
+  if (classes.length === 0) {
+    showError('Select at least one feature class.');
+    return;
+  }
+
+  setLoading(true);
+  hideError();
+  emptyState.style.display = 'none';
+  featureGroups.innerHTML = '';
+  downloadBar.classList.remove('visible');
+
+  const fd = new FormData();
+  fd.append('image', fileImage.files[0]);
+  if (fileMask.files[0]) fd.append('mask', fileMask.files[0]);
+  fd.append('bins', binsSlider.value);
+  fd.append('normalize', normalizeToggle.checked);
+  fd.append('feature_classes', classes.join(','));
+
+  try {
+    const res = await fetch('/extract', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      showError(data.detail || 'Extraction failed.');
+      setLoading(false);
+      return;
+    }
+    lastResults = data;
+    renderResults(data, classes, parseInt(binsSlider.value));
+  } catch (err) {
+    showError('Network error: ' + err.message);
+  }
+
+  setLoading(false);
+});
+
+// ── Render results ─────────────────────────────────────────────────────────
+function renderResults(data, classes, bins) {
+  // Group by prefix
+  const groups = {};
+  for (const [key, val] of Object.entries(data)) {
+    const prefix = key.split('_')[0];
+    if (!groups[prefix]) groups[prefix] = [];
+    groups[prefix].push([key, val]);
+  }
+
+  const totalFeats  = Object.keys(data).length;
+  const finiteCount = Object.values(data).filter(v => v !== null).length;
+
+  statFeatures.textContent = totalFeats;
+  statClasses.textContent  = Object.keys(groups).length;
+  statFinite.textContent   = finiteCount;
+  statBins.textContent     = bins;
+
+  featureGroups.innerHTML = '';
+
+  const order = ['firstorder', 'shape', 'glcm', 'glrlm', 'glszm', 'ngtdm'];
+  const sortedPrefixes = [
+    ...order.filter(p => groups[p]),
+    ...Object.keys(groups).filter(p => !order.includes(p)),
+  ];
+
+  sortedPrefixes.forEach((prefix, idx) => {
+    const entries = groups[prefix];
+    const color   = CLASS_COLORS[prefix] || '#aaa';
+
+    const grp = document.createElement('div');
+    grp.className = 'feat-group' + (idx === 0 ? ' open' : '');
+
+    const head = document.createElement('div');
+    head.className = 'feat-group-head';
+    head.innerHTML = `
+      <span class="fg-dot" style="background:${color}"></span>
+      <span class="fg-name">${prefix}</span>
+      <span class="fg-count">${entries.length}</span>
+      <span class="fg-arrow">▶</span>
+    `;
+    head.addEventListener('click', () => grp.classList.toggle('open'));
+
+    const table = document.createElement('div');
+    table.className = 'feat-table';
+
+    entries.forEach(([key, val]) => {
+      const shortKey = key.substring(prefix.length + 1);
+      const row = document.createElement('div');
+      row.className = 'feat-row';
+      const valStr = val === null ? 'NaN' : val.toPrecision(6);
+      row.innerHTML = `
+        <span class="feat-name">${shortKey}</span>
+        <span class="feat-val${val === null ? ' null' : ''}">${valStr}</span>
+      `;
+      table.appendChild(row);
+    });
+
+    grp.appendChild(head);
+    grp.appendChild(table);
+    featureGroups.appendChild(grp);
+  });
+
+  downloadBar.classList.add('visible');
+}
+
+// ── Downloads ──────────────────────────────────────────────────────────────
+document.getElementById('btnCSV').addEventListener('click', () => {
+  if (!lastResults) return;
+  const keys = Object.keys(lastResults);
+  const vals = keys.map(k => lastResults[k] === null ? '' : lastResults[k]);
+  const csv  = keys.join(',') + '\n' + vals.join(',');
+  downloadBlob(csv, 'radiomics_features.csv', 'text/csv');
+});
+
+document.getElementById('btnJSON').addEventListener('click', () => {
+  if (!lastResults) return;
+  downloadBlob(JSON.stringify(lastResults, null, 2), 'radiomics_features.json', 'application/json');
+});
+
+function downloadBlob(content, filename, mime) {
+  const a    = document.createElement('a');
+  a.href     = URL.createObjectURL(new Blob([content], { type: mime }));
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function setLoading(on) {
+  btnExtract.disabled = on;
+  btnIcon.style.display    = on ? 'none' : '';
+  btnLabel.textContent     = on ? 'Extracting…' : 'Extract Features';
+  btnSpinner.style.display = on ? 'block' : 'none';
+}
+
+function showError(msg) {
+  errorBanner.textContent     = '⚠ ' + msg;
+  errorBanner.style.display   = 'block';
+}
+
+function hideError() {
+  errorBanner.style.display = 'none';
+}
+</script>
+</body>
+</html>
