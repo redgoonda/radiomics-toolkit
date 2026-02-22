@@ -603,6 +603,21 @@
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
   ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
+  /* Folder upload button */
+  .btn-folder {
+    width: 100%;
+    margin-top: 6px;
+    padding: 7px;
+    background: var(--surface2);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-size: 12px;
+    cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .btn-folder:hover { border-color: var(--accent); color: var(--text); }
+
   /* Class colour accents */
   .fg-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .c-firstorder { background: #5b8dee; }
@@ -632,12 +647,18 @@
     <div>
       <div class="section-label">Image</div>
       <div class="drop-zone" id="dzImage">
+        <!-- Single file input -->
         <input type="file" id="fileImage" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy,.nii,.nii.gz" />
-        <div class="dz-icon">🖼</div>
-        <div class="dz-label">Drop or click to upload</div>
+        <div class="dz-icon" id="dzImageIcon">🖼</div>
+        <div class="dz-label" id="dzImageLabel">Drop file or folder · or click to browse</div>
         <div class="dz-label">PNG · JPEG · TIFF · DICOM · NIfTI</div>
         <div class="dz-name" id="imgName"></div>
       </div>
+      <!-- Hidden folder picker (webkitdirectory) — triggered by button below -->
+      <input type="file" id="fileDicomDir" webkitdirectory multiple style="display:none" />
+      <button class="btn-folder" id="btnUploadFolder" title="Select a DICOM folder">
+        📁 Upload DICOM Folder
+      </button>
     </div>
 
     <!-- Mask section (tabbed) -->
@@ -811,50 +832,175 @@
 
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
-let lastResults = null;
-// Auto-segmentation state
-let autoSegState = { session_id: null, voxels: 0, preview: null };
-// Last raw greyscale preview blob URL (for re-rendering overlay)
+let lastResults   = null;
+let autoSegState  = { session_id: null, voxels: 0, preview: null };
 let rawPreviewUrl = null;
 
+// Image source: either a single File or an array of DICOM File objects
+let imageFile      = null;   // single File
+let dicomFiles     = null;   // File[] when a DICOM directory is loaded
+
 const CLASS_COLORS = {
-  firstorder: '#5b8dee',
-  shape:      '#7c5ce0',
-  glcm:       '#00cec9',
-  glrlm:      '#fd79a8',
-  glszm:      '#fdcb6e',
-  ngtdm:      '#55efc4',
+  firstorder: '#5b8dee', shape: '#7c5ce0', glcm: '#00cec9',
+  glrlm: '#fd79a8', glszm: '#fdcb6e', ngtdm: '#55efc4',
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-const fileImage       = document.getElementById('fileImage');
-const fileMask        = document.getElementById('fileMask');
-const imgName         = document.getElementById('imgName');
-const maskName        = document.getElementById('maskName');
-const binsSlider      = document.getElementById('binsSlider');
-const binsVal         = document.getElementById('binsVal');
-const normalizeToggle = document.getElementById('normalizeToggle');
-const btnExtract      = document.getElementById('btnExtract');
-const btnIcon         = document.getElementById('btnIcon');
-const btnLabel        = document.getElementById('btnLabel');
-const btnSpinner      = document.getElementById('btnSpinner');
-const previewCanvas   = document.getElementById('previewCanvas');
+const fileImage        = document.getElementById('fileImage');
+const fileDicomDir     = document.getElementById('fileDicomDir');
+const btnUploadFolder  = document.getElementById('btnUploadFolder');
+const fileMask         = document.getElementById('fileMask');
+const imgName          = document.getElementById('imgName');
+const dzImageLabel     = document.getElementById('dzImageLabel');
+const maskName         = document.getElementById('maskName');
+const binsSlider       = document.getElementById('binsSlider');
+const binsVal          = document.getElementById('binsVal');
+const normalizeToggle  = document.getElementById('normalizeToggle');
+const btnExtract       = document.getElementById('btnExtract');
+const btnIcon          = document.getElementById('btnIcon');
+const btnLabel         = document.getElementById('btnLabel');
+const btnSpinner       = document.getElementById('btnSpinner');
+const previewCanvas    = document.getElementById('previewCanvas');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
-const imgMeta         = document.getElementById('imgMeta');
-const emptyState      = document.getElementById('emptyState');
-const errorBanner     = document.getElementById('errorBanner');
-const featureGroups   = document.getElementById('featureGroups');
-const downloadBar     = document.getElementById('downloadBar');
-const statFeatures    = document.getElementById('statFeatures');
-const statClasses     = document.getElementById('statClasses');
-const statFinite      = document.getElementById('statFinite');
-const statBins        = document.getElementById('statBins');
-const classGrid       = document.getElementById('classGrid');
-const btnAutoSeg      = document.getElementById('btnAutoSeg');
-const segSpinner      = document.getElementById('segSpinner');
-const segBtnLabel     = document.getElementById('segBtnLabel');
-const maskStatus      = document.getElementById('maskStatus');
-const maskStatusText  = document.getElementById('maskStatusText');
+const imgMeta          = document.getElementById('imgMeta');
+const emptyState       = document.getElementById('emptyState');
+const errorBanner      = document.getElementById('errorBanner');
+const featureGroups    = document.getElementById('featureGroups');
+const downloadBar      = document.getElementById('downloadBar');
+const statFeatures     = document.getElementById('statFeatures');
+const statClasses      = document.getElementById('statClasses');
+const statFinite       = document.getElementById('statFinite');
+const statBins         = document.getElementById('statBins');
+const classGrid        = document.getElementById('classGrid');
+const btnAutoSeg       = document.getElementById('btnAutoSeg');
+const segSpinner       = document.getElementById('segSpinner');
+const segBtnLabel      = document.getElementById('segBtnLabel');
+const maskStatus       = document.getElementById('maskStatus');
+const maskStatusText   = document.getElementById('maskStatusText');
+const dzImage          = document.getElementById('dzImage');
+
+// ── Image helpers ──────────────────────────────────────────────────────────
+function hasImage() { return imageFile || (dicomFiles && dicomFiles.length > 0); }
+
+/** Append the image (single or DICOM dir) to a FormData. */
+function appendImageToForm(fd) {
+  if (dicomFiles && dicomFiles.length > 0) {
+    for (const f of dicomFiles) fd.append('dicom_files', f);
+  } else if (imageFile) {
+    fd.append('image', imageFile);
+  }
+}
+
+/** Handle a single-file selection (from input or drop). */
+function handleSingleFile(file) {
+  imageFile  = file;
+  dicomFiles = null;
+  imgName.textContent = file.name;
+  dzImageLabel.textContent = 'Drop file or folder · or click to browse';
+  btnExtract.disabled = false;
+  btnAutoSeg.disabled = false;
+  updateMaskStatus();
+  loadPreviewSingle(file);
+}
+
+/** Handle a DICOM directory (from webkitdirectory input or folder drop). */
+function handleDicomDirectory(files, dirName) {
+  const dcmFiles = Array.from(files).filter(f =>
+    f.name.toLowerCase().endsWith('.dcm')
+  );
+  if (dcmFiles.length === 0) {
+    showError('No .dcm files found in the selected folder.');
+    return;
+  }
+  imageFile  = null;
+  dicomFiles = dcmFiles;
+
+  const totalKB = (dcmFiles.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0);
+  imgName.textContent = `${dirName}/ (${dcmFiles.length} slices)`;
+  dzImageLabel.textContent = 'DICOM folder loaded';
+  btnExtract.disabled = false;
+  btnAutoSeg.disabled = false;
+  updateMaskStatus();
+  loadPreviewDicom(dcmFiles, dirName, totalKB);
+}
+
+// ── Single-file input ──────────────────────────────────────────────────────
+fileImage.addEventListener('change', () => {
+  if (fileImage.files[0]) handleSingleFile(fileImage.files[0]);
+});
+
+// ── Folder picker input ────────────────────────────────────────────────────
+btnUploadFolder.addEventListener('click', (e) => {
+  e.stopPropagation(); // don't bubble to dzImage
+  fileDicomDir.click();
+});
+
+fileDicomDir.addEventListener('change', () => {
+  if (!fileDicomDir.files.length) return;
+  // webkitdirectory puts all files in files[]; derive folder name from first file's relative path
+  const firstRelative = fileDicomDir.files[0].webkitRelativePath || '';
+  const dirName = firstRelative.split('/')[0] || 'DICOM';
+  handleDicomDirectory(fileDicomDir.files, dirName);
+});
+
+// ── Drag and drop on dzImage ───────────────────────────────────────────────
+dzImage.addEventListener('dragover', e => { e.preventDefault(); dzImage.classList.add('drag-over'); });
+dzImage.addEventListener('dragleave', () => dzImage.classList.remove('drag-over'));
+
+dzImage.addEventListener('drop', async e => {
+  e.preventDefault();
+  dzImage.classList.remove('drag-over');
+
+  const items = e.dataTransfer.items ? [...e.dataTransfer.items] : [];
+
+  // Try to read as a directory entry first
+  if (items.length > 0 && items[0].webkitGetAsEntry) {
+    const entry = items[0].webkitGetAsEntry();
+    if (entry && entry.isDirectory) {
+      const files = await readDirectoryEntry(entry);
+      handleDicomDirectory(files, entry.name);
+      return;
+    }
+  }
+
+  // Single file drop
+  const file = e.dataTransfer.files[0];
+  if (file) handleSingleFile(file);
+});
+
+/** Recursively read all files from a DataTransferItem directory entry. */
+async function readDirectoryEntry(dirEntry) {
+  return new Promise(resolve => {
+    const reader = dirEntry.createReader();
+    const allFiles = [];
+
+    function readBatch() {
+      reader.readEntries(async entries => {
+        if (!entries.length) { resolve(allFiles); return; }
+        for (const entry of entries) {
+          if (entry.isFile) {
+            allFiles.push(await fileFromEntry(entry));
+          }
+          // flat DICOM dirs — skip subdirectories
+        }
+        readBatch(); // readEntries returns at most 100 at a time
+      });
+    }
+    readBatch();
+  });
+}
+
+function fileFromEntry(fileEntry) {
+  return new Promise(resolve => fileEntry.file(resolve));
+}
+
+// dzMask drag highlight
+const dzMask = document.getElementById('dzMask');
+if (dzMask) {
+  dzMask.addEventListener('dragover', e => { e.preventDefault(); dzMask.classList.add('drag-over'); });
+  dzMask.addEventListener('dragleave', () => dzMask.classList.remove('drag-over'));
+  dzMask.addEventListener('drop', () => dzMask.classList.remove('drag-over'));
+}
 
 // ── Mask tab switching ─────────────────────────────────────────────────────
 function switchMaskTab(tab) {
@@ -864,29 +1010,9 @@ function switchMaskTab(tab) {
   document.getElementById('contentManual').classList.toggle('active', tab === 'manual');
 }
 
-// ── File inputs ────────────────────────────────────────────────────────────
-fileImage.addEventListener('change', () => {
-  const f = fileImage.files[0];
-  if (!f) return;
-  imgName.textContent = f.name;
-  btnExtract.disabled = false;
-  btnAutoSeg.disabled = false;
-  updateMaskStatus();
-  loadPreview(f);
-});
-
 fileMask.addEventListener('change', () => {
   const f = fileMask.files[0];
   maskName.textContent = f ? f.name : '';
-});
-
-// Drag-over highlight
-['dzImage', 'dzMask'].forEach(id => {
-  const el = document.getElementById(id);
-  if (!el) return;
-  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
-  el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
-  el.addEventListener('drop', () => el.classList.remove('drag-over'));
 });
 
 // ── Bins slider ────────────────────────────────────────────────────────────
@@ -903,22 +1029,18 @@ classGrid.querySelectorAll('.class-chip').forEach(chip => {
 
 // ── Mask status helpers ────────────────────────────────────────────────────
 function updateMaskStatus() {
-  if (!fileImage.files[0]) {
+  if (!hasImage()) {
     maskStatus.className = 'mask-status';
     maskStatusText.textContent = 'No mask — image required';
     return;
   }
   if (autoSegState.session_id) {
     maskStatus.className = 'mask-status ready';
-    maskStatusText.textContent =
-      `${autoSegState.voxels.toLocaleString()} voxels — TotalSeg`;
-    // Ensure clear button exists
+    maskStatusText.textContent = `${autoSegState.voxels.toLocaleString()} voxels — TotalSeg`;
     if (!document.getElementById('clearMaskBtn')) {
       const btn = document.createElement('button');
-      btn.className = 'clear-btn';
-      btn.id = 'clearMaskBtn';
-      btn.title = 'Clear mask';
-      btn.textContent = '×';
+      btn.className = 'clear-btn'; btn.id = 'clearMaskBtn';
+      btn.title = 'Clear mask'; btn.textContent = '×';
       btn.onclick = clearAutoSeg;
       maskStatus.appendChild(btn);
     }
@@ -933,56 +1055,99 @@ function updateMaskStatus() {
 function clearAutoSeg() {
   autoSegState = { session_id: null, voxels: 0, preview: null };
   updateMaskStatus();
-  // Re-render plain preview without overlay
-  if (rawPreviewUrl) {
-    renderPlainPreview(rawPreviewUrl);
-  }
+  if (rawPreviewUrl) renderPlainPreview(rawPreviewUrl);
+}
+
+// ── Preview ────────────────────────────────────────────────────────────────
+async function loadPreviewSingle(file) {
+  const fd = new FormData();
+  fd.append('image', file);
+  try {
+    const res = await fetch('/preview', { method: 'POST', body: fd });
+    if (!res.ok) return;
+    const url = URL.createObjectURL(await res.blob());
+    rawPreviewUrl = url;
+    renderPlainPreview(url);
+    imgMeta.textContent = `${file.name}  ·  ${(file.size / 1024).toFixed(1)} KB`;
+  } catch (_) {}
+}
+
+async function loadPreviewDicom(files, dirName, totalKB) {
+  // Send middle slice as a single DICOM for preview
+  const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
+  const mid    = sorted[Math.floor(sorted.length / 2)];
+  const fd     = new FormData();
+  fd.append('image', mid);
+  try {
+    const res = await fetch('/preview', { method: 'POST', body: fd });
+    if (!res.ok) return;
+    const url = URL.createObjectURL(await res.blob());
+    rawPreviewUrl = url;
+    renderPlainPreview(url);
+    imgMeta.textContent = `${dirName}/  ·  ${files.length} slices  ·  ${totalKB} KB total`;
+  } catch (_) {}
+}
+
+function renderPlainPreview(url) {
+  const img = new Image();
+  img.onload = () => {
+    previewCanvas.width  = img.naturalWidth;
+    previewCanvas.height = img.naturalHeight;
+    previewCanvas.getContext('2d').drawImage(img, 0, 0);
+    previewCanvas.style.display = 'block';
+    previewPlaceholder.style.display = 'none';
+  };
+  img.src = url;
+}
+
+function renderBase64Preview(b64) {
+  const img = new Image();
+  img.onload = () => {
+    previewCanvas.width  = img.naturalWidth;
+    previewCanvas.height = img.naturalHeight;
+    previewCanvas.getContext('2d').drawImage(img, 0, 0);
+    previewCanvas.style.display = 'block';
+    previewPlaceholder.style.display = 'none';
+  };
+  img.src = 'data:image/png;base64,' + b64;
 }
 
 // ── Auto-segmentation ──────────────────────────────────────────────────────
 btnAutoSeg.addEventListener('click', async () => {
-  if (!fileImage.files[0]) return;
+  if (!hasImage()) return;
 
   const taskVal  = document.getElementById('segTask').value;
   const speedVal = document.getElementById('segSpeed').value;
   const fast     = speedVal === 'fast';
 
-  // For 2D images or "body" task, use otsu; otherwise use totalsegmentator
-  const fname   = fileImage.files[0].name.toLowerCase();
-  const is2d    = /\.(png|jpg|jpeg|bmp|tiff?|npy)$/.test(fname);
-  const strategy = (is2d || taskVal === 'body') ? 'otsu' : 'totalsegmentator';
+  // Determine strategy
+  let strategy = 'totalsegmentator';
+  if (dicomFiles) {
+    strategy = 'totalsegmentator'; // DICOM dirs are always 3D
+  } else if (imageFile) {
+    const is2d = /\.(png|jpg|jpeg|bmp|tiff?|npy)$/i.test(imageFile.name);
+    if (is2d || taskVal === 'body') strategy = 'otsu';
+  }
 
   setSegLoading(true);
   hideError();
 
   const fd = new FormData();
-  fd.append('image', fileImage.files[0]);
+  appendImageToForm(fd);
   fd.append('strategy', strategy);
   fd.append('fast', fast ? 'true' : 'false');
   fd.append('device', 'cpu');
 
   try {
-    const res = await fetch('/segment', { method: 'POST', body: fd });
+    const res  = await fetch('/segment', { method: 'POST', body: fd });
     const data = await res.json();
-    if (!res.ok) {
-      showError((data.detail || 'Segmentation failed.'));
-      setSegLoading(false);
-      return;
-    }
-    autoSegState = {
-      session_id: data.session_id,
-      voxels:     data.voxels,
-      preview:    data.preview,
-    };
+    if (!res.ok) { showError(data.detail || 'Segmentation failed.'); setSegLoading(false); return; }
+    autoSegState = { session_id: data.session_id, voxels: data.voxels, preview: data.preview };
     updateMaskStatus();
-    // Show the overlay from the server-returned base64 PNG
-    if (data.preview) {
-      renderBase64Preview(data.preview);
-    }
+    if (data.preview) renderBase64Preview(data.preview);
   } catch (err) {
     showError('Segmentation network error: ' + err.message);
   }
-
   setSegLoading(false);
 });
 
@@ -992,71 +1157,22 @@ function setSegLoading(on) {
   segBtnLabel.textContent  = on ? 'Segmenting…' : 'Auto Segment ⚡';
 }
 
-// ── Image preview ──────────────────────────────────────────────────────────
-async function loadPreview(file) {
-  const fd = new FormData();
-  fd.append('image', file);
-  try {
-    const res = await fetch('/preview', { method: 'POST', body: fd });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url  = URL.createObjectURL(blob);
-    rawPreviewUrl = url;
-    renderPlainPreview(url);
-    imgMeta.textContent = `${file.name}  ·  ${(file.size / 1024).toFixed(1)} KB`;
-  } catch (_) { /* preview is optional */ }
-}
-
-function renderPlainPreview(url) {
-  const img = new Image();
-  img.onload = () => {
-    previewCanvas.width  = img.naturalWidth;
-    previewCanvas.height = img.naturalHeight;
-    const ctx = previewCanvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    previewCanvas.style.display = 'block';
-    previewPlaceholder.style.display = 'none';
-  };
-  img.src = url;
-}
-
-function renderBase64Preview(b64) {
-  const url = 'data:image/png;base64,' + b64;
-  const img = new Image();
-  img.onload = () => {
-    previewCanvas.width  = img.naturalWidth;
-    previewCanvas.height = img.naturalHeight;
-    const ctx = previewCanvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    previewCanvas.style.display = 'block';
-    previewPlaceholder.style.display = 'none';
-  };
-  img.src = url;
-}
-
 // ── Extract ────────────────────────────────────────────────────────────────
 btnExtract.addEventListener('click', async () => {
-  if (!fileImage.files[0]) return;
+  if (!hasImage()) return;
 
-  // Collect selected classes
   const classes = [];
-  classGrid.querySelectorAll('.class-chip.checked').forEach(chip => {
-    classes.push(chip.dataset.class);
-  });
-  if (classes.length === 0) {
-    showError('Select at least one feature class.');
-    return;
-  }
+  classGrid.querySelectorAll('.class-chip.checked').forEach(chip => classes.push(chip.dataset.class));
+  if (classes.length === 0) { showError('Select at least one feature class.'); return; }
 
   setLoading(true);
   hideError();
   emptyState.style.display = 'none';
-  featureGroups.innerHTML = '';
+  featureGroups.innerHTML  = '';
   downloadBar.classList.remove('visible');
 
   const fd = new FormData();
-  fd.append('image', fileImage.files[0]);
-  // Use manual mask upload if provided; otherwise rely on session_id
+  appendImageToForm(fd);
   if (fileMask.files[0]) {
     fd.append('mask', fileMask.files[0]);
   } else if (autoSegState.session_id) {
@@ -1067,19 +1183,14 @@ btnExtract.addEventListener('click', async () => {
   fd.append('feature_classes', classes.join(','));
 
   try {
-    const res = await fetch('/extract', { method: 'POST', body: fd });
+    const res  = await fetch('/extract', { method: 'POST', body: fd });
     const data = await res.json();
-    if (!res.ok) {
-      showError(data.detail || 'Extraction failed.');
-      setLoading(false);
-      return;
-    }
+    if (!res.ok) { showError(data.detail || 'Extraction failed.'); setLoading(false); return; }
     lastResults = data;
     renderResults(data, classes, parseInt(binsSlider.value));
   } catch (err) {
     showError('Network error: ' + err.message);
   }
-
   setLoading(false);
 });
 

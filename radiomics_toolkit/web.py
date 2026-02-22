@@ -9,12 +9,11 @@ from __future__ import annotations
 
 import base64
 import io
-import json
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 import numpy as np
 
@@ -36,126 +35,190 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 _sessions: dict[str, Path] = {}
 
 
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+async def _save_image_upload(
+    image: Optional[UploadFile],
+    dicom_files: List[UploadFile],
+    tmp: Path,
+) -> Path:
+    """Save uploaded image(s) to *tmp* and return the path for loaders.
+
+    - Single file  → ``tmp/<filename>``
+    - Multiple DICOM files → ``tmp/dicom/`` directory (loader auto-detects)
+    """
+    if dicom_files:
+        dcm_dir = tmp / "dicom"
+        dcm_dir.mkdir(exist_ok=True)
+        for f in dicom_files:
+            fname = Path(f.filename).name if f.filename else f"slice_{uuid.uuid4().hex[:8]}.dcm"
+            (dcm_dir / fname).write_bytes(await f.read())
+        return dcm_dir
+    else:
+        fname = Path(image.filename).name if image.filename else "upload"
+        p = tmp / fname
+        p.write_bytes(await image.read())
+        return p
+
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     return (_STATIC / "index.html").read_text(encoding="utf-8")
 
 
+@app.post("/preview")
+async def preview(
+    image: Optional[UploadFile] = File(None),
+    dicom_files: List[UploadFile] = File(default=[]),
+):
+    """Return a normalised PNG for browser preview.
+
+    Accepts either a single file (``image``) or multiple DICOM files
+    (``dicom_files``).  For 3-D volumes the middle axial slice is returned.
+    """
+    from PIL import Image as PILImage
+
+    with tempfile.TemporaryDirectory() as tmp:
+        img_path = await _save_image_upload(image, dicom_files, Path(tmp))
+
+        try:
+            if img_path.is_dir():
+                import pydicom
+
+                dcm_files = sorted(img_path.glob("*.dcm"))
+                if not dcm_files:
+                    raise HTTPException(status_code=422, detail="No .dcm files in uploaded directory.")
+                mid = dcm_files[len(dcm_files) // 2]
+                ds = pydicom.dcmread(str(mid))
+                arr = ds.pixel_array.astype(float)
+                slope = float(getattr(ds, "RescaleSlope", 1.0))
+                intercept = float(getattr(ds, "RescaleIntercept", 0.0))
+                arr = arr * slope + intercept
+            elif img_path.suffix.lower() == ".dcm":
+                import pydicom
+
+                ds = pydicom.dcmread(str(img_path))
+                arr = ds.pixel_array.astype(float)
+                slope = float(getattr(ds, "RescaleSlope", 1.0))
+                intercept = float(getattr(ds, "RescaleIntercept", 0.0))
+                arr = arr * slope + intercept
+            else:
+                arr = np.array(PILImage.open(str(img_path)).convert("L"), dtype=float)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=422, detail=f"Cannot decode image: {exc}")
+
+    lo, hi = arr.min(), arr.max()
+    if hi > lo:
+        arr = (arr - lo) / (hi - lo) * 255
+    img_out = PILImage.fromarray(arr.astype(np.uint8))
+
+    buf = io.BytesIO()
+    img_out.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
+
+
 @app.post("/segment")
 async def segment(
-    image: UploadFile = File(...),
+    image: Optional[UploadFile] = File(None),
+    dicom_files: List[UploadFile] = File(default=[]),
     strategy: str = Form("totalsegmentator"),
     fast: bool = Form(True),
     device: str = Form("cpu"),
 ):
     """Auto-segment an image and return a session_id + preview overlay.
 
-    Form fields
-    -----------
-    strategy : "totalsegmentator" | "otsu"
-    fast     : bool — use fast (3 mm) TotalSegmentator mode
-    device   : str  — compute device for TotalSegmentator ("cpu" / "gpu")
-    image    : uploaded image file
+    Accepts either ``image`` (single file) or ``dicom_files`` (DICOM series).
     """
     from PIL import Image as PILImage
 
-    data = await image.read()
-    suffix = Path(image.filename or "upload").suffix.lower()
-    is_2d = suffix in {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
+    if not image and not dicom_files:
+        raise HTTPException(status_code=422, detail="Provide either 'image' or 'dicom_files'.")
 
-    # ------------------------------------------------------------------
-    # Create a temp dir that persists beyond this request (session-owned)
-    # ------------------------------------------------------------------
+    is_2d = False
+    if image and not dicom_files:
+        suffix = Path(image.filename or "upload").suffix.lower()
+        is_2d = suffix in {".png", ".jpg", ".jpeg", ".bmp", ".tiff", ".tif"}
+
     session_dir = Path(tempfile.mkdtemp())
     sid = str(uuid.uuid4())
 
     try:
-        if is_2d or strategy == "otsu":
-            # ── 2D / Otsu path ─────────────────────────────────────────
-            from .segmentation import segment_2d_fallback
+        tmp_in = Path(tempfile.mkdtemp())
+        try:
+            img_path = await _save_image_upload(image, dicom_files, tmp_in)
 
-            try:
-                arr = np.array(
-                    PILImage.open(io.BytesIO(data)).convert("L"), dtype=np.float64
-                )
-            except Exception as exc:
-                raise HTTPException(status_code=422, detail=f"Cannot decode image: {exc}")
+            if is_2d or strategy == "otsu":
+                # ── 2D / Otsu path ─────────────────────────────────────
+                from .segmentation import segment_2d_fallback
 
-            mask = segment_2d_fallback(arr)
+                try:
+                    arr = np.array(
+                        PILImage.open(str(img_path)).convert("L"), dtype=np.float64
+                    )
+                except Exception as exc:
+                    raise HTTPException(status_code=422, detail=f"Cannot decode image: {exc}")
 
-            # Save mask to session
-            mask_path = session_dir / "mask.npy"
-            np.save(str(mask_path), mask)
-            _sessions[sid] = mask_path
+                mask = segment_2d_fallback(arr)
+                mask_path = session_dir / "mask.npy"
+                np.save(str(mask_path), mask)
+                _sessions[sid] = mask_path
 
-            # Build overlay preview
-            preview_b64 = _make_2d_overlay_b64(arr, mask)
-
-            return JSONResponse(
-                content={
+                preview_b64 = _make_2d_overlay_b64(arr, mask)
+                return JSONResponse(content={
                     "session_id": sid,
                     "voxels": int(mask.sum()),
                     "dims": list(mask.shape),
                     "method": "otsu",
                     "preview": preview_b64,
-                }
-            )
+                })
 
-        else:
-            # ── 3D / TotalSegmentator path ──────────────────────────────
-            from .segmentation import segment_with_totalseg
-
-            # Write the uploaded file to disk so TotalSegmentator can read it
-            img_path = session_dir / (image.filename or f"image{suffix}")
-            img_path.write_bytes(data)
-
-            try:
-                mask = segment_with_totalseg(img_path, fast=fast, device=device)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"TotalSegmentator failed: {exc}",
-                )
-
-            # Save mask to session
-            mask_path = session_dir / "mask.npy"
-            np.save(str(mask_path), mask)
-            _sessions[sid] = mask_path
-
-            # Extract middle axial slice for preview
-            if mask.ndim == 3:
-                mid = mask.shape[0] // 2
-                mask_slice = mask[mid]
-                # Load the original image middle slice for overlay
-                try:
-                    import nibabel as nib
-
-                    img_nib = nib.load(str(img_path))
-                    img_arr = np.asarray(img_nib.dataobj)
-                    if img_arr.ndim == 3:
-                        img_slice = img_arr[mid].astype(float)
-                    else:
-                        img_slice = img_arr.astype(float)
-                except Exception:
-                    img_slice = mask_slice.astype(float) * 128
-                preview_b64 = _make_2d_overlay_b64(img_slice, mask_slice)
             else:
-                preview_b64 = _make_2d_overlay_b64(
-                    mask.astype(float) * 128, mask
-                )
+                # ── 3D / TotalSegmentator path ──────────────────────────
+                from .segmentation import segment_with_totalseg
 
-            return JSONResponse(
-                content={
+                try:
+                    mask = segment_with_totalseg(img_path, fast=fast, device=device)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"TotalSegmentator failed: {exc}",
+                    )
+
+                mask_path = session_dir / "mask.npy"
+                np.save(str(mask_path), mask)
+                _sessions[sid] = mask_path
+
+                # Middle axial slice preview
+                if mask.ndim == 3:
+                    mid = mask.shape[0] // 2
+                    mask_slice = mask[mid]
+                    try:
+                        import nibabel as nib
+                        img_nib = nib.load(str(img_path))
+                        img_arr = np.asarray(img_nib.dataobj)
+                        img_slice = img_arr[mid].astype(float) if img_arr.ndim == 3 else img_arr.astype(float)
+                    except Exception:
+                        img_slice = mask_slice.astype(float) * 128
+                    preview_b64 = _make_2d_overlay_b64(img_slice, mask_slice)
+                else:
+                    preview_b64 = _make_2d_overlay_b64(mask.astype(float) * 128, mask)
+
+                return JSONResponse(content={
                     "session_id": sid,
                     "voxels": int(mask.sum()),
                     "dims": list(mask.shape),
                     "method": "totalsegmentator",
                     "preview": preview_b64,
-                }
-            )
+                })
+        finally:
+            shutil.rmtree(tmp_in, ignore_errors=True)
 
     except HTTPException:
-        # Clean up session dir on error
         shutil.rmtree(session_dir, ignore_errors=True)
         raise
     except Exception as exc:
@@ -167,7 +230,6 @@ def _make_2d_overlay_b64(image: np.ndarray, mask: np.ndarray) -> str:
     """Render a greyscale image with a blue mask overlay; return base64 PNG."""
     from PIL import Image as PILImage
 
-    # Normalise image to 0–255
     arr = image.astype(float)
     lo, hi = arr.min(), arr.max()
     if hi > lo:
@@ -175,7 +237,6 @@ def _make_2d_overlay_b64(image: np.ndarray, mask: np.ndarray) -> str:
     else:
         arr = np.zeros_like(arr)
 
-    # RGBA canvas
     h, w = arr.shape[:2]
     rgba = np.zeros((h, w, 4), dtype=np.uint8)
     grey = arr.astype(np.uint8)
@@ -184,9 +245,8 @@ def _make_2d_overlay_b64(image: np.ndarray, mask: np.ndarray) -> str:
     rgba[..., 2] = grey
     rgba[..., 3] = 255
 
-    # Stamp mask in blue tint rgba(91,141,238,0.4)
     m = mask > 0
-    rgba[m, 0] = np.clip(rgba[m, 0].astype(int) * 60 // 100 + 91 * 40 // 100, 0, 255).astype(np.uint8)
+    rgba[m, 0] = np.clip(rgba[m, 0].astype(int) * 60 // 100 + 91  * 40 // 100, 0, 255).astype(np.uint8)
     rgba[m, 1] = np.clip(rgba[m, 1].astype(int) * 60 // 100 + 141 * 40 // 100, 0, 255).astype(np.uint8)
     rgba[m, 2] = np.clip(rgba[m, 2].astype(int) * 60 // 100 + 238 * 40 // 100, 0, 255).astype(np.uint8)
 
@@ -198,36 +258,33 @@ def _make_2d_overlay_b64(image: np.ndarray, mask: np.ndarray) -> str:
 
 @app.post("/extract")
 async def extract(
-    image: UploadFile = File(...),
+    image: Optional[UploadFile] = File(None),
+    dicom_files: List[UploadFile] = File(default=[]),
     mask: Optional[UploadFile] = File(None),
     bins: int = Form(64),
     normalize: bool = Form(False),
     feature_classes: str = Form(",".join(_ALL_CLASSES)),
     session_id: str = Form(""),
 ):
-    """Upload image (+ optional mask or session_id), return extracted features as JSON."""
+    """Extract features from an image (single file or DICOM directory)."""
+    if not image and not dicom_files:
+        raise HTTPException(status_code=422, detail="Provide either 'image' or 'dicom_files'.")
+
     classes = [c.strip() for c in feature_classes.split(",") if c.strip()]
 
-    # Save uploads to temp files so loaders can handle them normally
     with tempfile.TemporaryDirectory() as tmp:
-        img_path = Path(tmp) / image.filename
-        img_path.write_bytes(await image.read())
+        tmp = Path(tmp)
+        img_path = await _save_image_upload(image, dicom_files, tmp)
 
         mask_path = None
-
-        # Priority 1: explicit mask upload
         if mask and mask.filename:
-            mask_path = Path(tmp) / mask.filename
+            mask_path = tmp / mask.filename
             mask_path.write_bytes(await mask.read())
-
-        # Priority 2: session mask from /segment
         elif session_id and session_id in _sessions:
             stored = _sessions[session_id]
             if stored.exists():
-                # Copy into the temp dir so the loader can find it
-                mask_path = Path(tmp) / "session_mask.npy"
-                import shutil as _shutil
-                _shutil.copy2(stored, mask_path)
+                mask_path = tmp / "session_mask.npy"
+                shutil.copy2(stored, mask_path)
 
         try:
             extractor = RadiomicsExtractor(
@@ -239,7 +296,6 @@ async def extract(
         except Exception as exc:
             raise HTTPException(status_code=422, detail=str(exc))
 
-    # Convert numpy scalars → Python floats for JSON serialisation
     clean: dict[str, float | None] = {}
     for k, v in results.items():
         try:
@@ -249,40 +305,6 @@ async def extract(
             clean[k] = None
 
     return JSONResponse(content=clean)
-
-
-@app.post("/preview")
-async def preview(image: UploadFile = File(...)):
-    """Return image as a normalised PNG for browser preview."""
-    from PIL import Image as PILImage
-
-    data = await image.read()
-    suffix = Path(image.filename).suffix.lower()
-
-    try:
-        if suffix == ".dcm":
-            import pydicom
-
-            with tempfile.NamedTemporaryFile(suffix=".dcm", delete=False) as f:
-                f.write(data)
-                f.flush()
-                ds = pydicom.dcmread(f.name)
-            arr = ds.pixel_array.astype(float)
-        else:
-            arr = np.array(PILImage.open(io.BytesIO(data)).convert("L"), dtype=float)
-    except Exception as exc:
-        raise HTTPException(status_code=422, detail=f"Cannot decode image: {exc}")
-
-    # Normalise to 0–255 for display
-    lo, hi = arr.min(), arr.max()
-    if hi > lo:
-        arr = (arr - lo) / (hi - lo) * 255
-    img_out = PILImage.fromarray(arr.astype(np.uint8))
-
-    buf = io.BytesIO()
-    img_out.save(buf, format="PNG")
-    buf.seek(0)
-    return StreamingResponse(buf, media_type="image/png")
 
 
 # ---------------------------------------------------------------------------
