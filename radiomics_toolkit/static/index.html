@@ -229,6 +229,135 @@
   .btn-extract:active { transform: scale(.98); }
   .btn-extract:disabled { opacity: .5; cursor: not-allowed; }
 
+  /* ── Mask section tabs ───────────────────────────────────── */
+  .mask-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+
+  .mask-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .mask-tab {
+    padding: 8px 6px;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    cursor: pointer;
+    color: var(--muted);
+    background: var(--surface);
+    border: none;
+    transition: color .15s, background .15s;
+    user-select: none;
+  }
+
+  .mask-tab.active {
+    color: var(--accent);
+    background: rgba(91,141,238,.1);
+    border-bottom: 2px solid var(--accent);
+  }
+
+  .mask-tab-content {
+    padding: 10px;
+    display: none;
+  }
+
+  .mask-tab-content.active { display: block; }
+
+  /* Auto-segment controls */
+  .seg-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .seg-select {
+    width: 100%;
+    padding: 6px 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    font-size: 12px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%237a8299' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    padding-right: 24px;
+  }
+
+  .seg-select:focus { outline: none; border-color: var(--accent); }
+
+  .btn-autoseg {
+    width: 100%;
+    padding: 9px;
+    background: linear-gradient(135deg, #2563eb, var(--accent2));
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity .2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .btn-autoseg:hover { opacity: .9; }
+  .btn-autoseg:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Mask status */
+  .mask-status {
+    margin-top: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 18px;
+  }
+
+  .mask-status .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--muted);
+    flex-shrink: 0;
+  }
+
+  .mask-status.ready .status-dot { background: var(--success); }
+  .mask-status.ready { color: var(--text); }
+
+  .mask-status .clear-btn {
+    margin-left: auto;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 13px;
+    padding: 0 2px;
+    line-height: 1;
+  }
+
+  .mask-status .clear-btn:hover { color: var(--danger); }
+
+  /* Seg spinner */
+  .seg-spinner {
+    display: none;
+    width: 14px; height: 14px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex-shrink: 0;
+  }
+
   /* ── Right panel ─────────────────────────────────────────── */
   .main {
     display: grid;
@@ -273,11 +402,12 @@
     padding: 8px;
   }
 
-  .preview-card img {
+  .preview-card canvas {
     max-width: 100%;
     max-height: 140px;
     border-radius: 4px;
     display: none;
+    image-rendering: pixelated;
   }
 
   .preview-card .placeholder {
@@ -502,22 +632,55 @@
     <div>
       <div class="section-label">Image</div>
       <div class="drop-zone" id="dzImage">
-        <input type="file" id="fileImage" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy" />
+        <input type="file" id="fileImage" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy,.nii,.nii.gz" />
         <div class="dz-icon">🖼</div>
         <div class="dz-label">Drop or click to upload</div>
-        <div class="dz-label">PNG · JPEG · TIFF · DICOM</div>
+        <div class="dz-label">PNG · JPEG · TIFF · DICOM · NIfTI</div>
         <div class="dz-name" id="imgName"></div>
       </div>
     </div>
 
-    <!-- Mask upload -->
+    <!-- Mask section (tabbed) -->
     <div>
       <div class="section-label">Mask <span style="color:var(--muted);text-transform:none;font-weight:400;font-size:10px">(optional)</span></div>
-      <div class="drop-zone" id="dzMask">
-        <input type="file" id="fileMask" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy" />
-        <div class="dz-icon">🎭</div>
-        <div class="dz-label">Drop or click to upload</div>
-        <div class="dz-name" id="maskName"></div>
+      <div class="mask-section">
+        <div class="mask-tabs">
+          <button class="mask-tab active" id="tabAuto" onclick="switchMaskTab('auto')">Auto Segment ⚡</button>
+          <button class="mask-tab" id="tabManual" onclick="switchMaskTab('manual')">Manual Upload</button>
+        </div>
+
+        <!-- Auto Segment tab -->
+        <div class="mask-tab-content active" id="contentAuto">
+          <div class="seg-controls">
+            <select class="seg-select" id="segTask">
+              <option value="total">Total CT (117 structures)</option>
+              <option value="total_mr">Total MR (50 structures)</option>
+              <option value="body">Body outline</option>
+            </select>
+            <select class="seg-select" id="segSpeed">
+              <option value="fast">Fast (3 mm)</option>
+              <option value="standard">Standard (1.5 mm)</option>
+            </select>
+            <button class="btn-autoseg" id="btnAutoSeg" disabled>
+              <div class="seg-spinner" id="segSpinner"></div>
+              <span id="segBtnLabel">Auto Segment ⚡</span>
+            </button>
+          </div>
+          <div class="mask-status" id="maskStatus">
+            <span class="status-dot"></span>
+            <span id="maskStatusText">No mask — image required</span>
+          </div>
+        </div>
+
+        <!-- Manual Upload tab -->
+        <div class="mask-tab-content" id="contentManual">
+          <div class="drop-zone" id="dzMask" style="border-radius:0;border:none;border-top:1px dashed var(--border);">
+            <input type="file" id="fileMask" accept=".png,.jpg,.jpeg,.tiff,.tif,.dcm,.npy" />
+            <div class="dz-icon">🎭</div>
+            <div class="dz-label">Drop or click to upload</div>
+            <div class="dz-name" id="maskName"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -594,7 +757,7 @@
       <div class="preview-card">
         <div class="card-head">Preview</div>
         <div class="img-wrap">
-          <img id="imgPreview" alt="preview" />
+          <canvas id="previewCanvas"></canvas>
           <div class="placeholder" id="previewPlaceholder">No image loaded</div>
         </div>
         <div class="img-meta" id="imgMeta"></div>
@@ -649,6 +812,10 @@
 <script>
 // ── State ──────────────────────────────────────────────────────────────────
 let lastResults = null;
+// Auto-segmentation state
+let autoSegState = { session_id: null, voxels: 0, preview: null };
+// Last raw greyscale preview blob URL (for re-rendering overlay)
+let rawPreviewUrl = null;
 
 const CLASS_COLORS = {
   firstorder: '#5b8dee',
@@ -660,29 +827,42 @@ const CLASS_COLORS = {
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-const fileImage      = document.getElementById('fileImage');
-const fileMask       = document.getElementById('fileMask');
-const imgName        = document.getElementById('imgName');
-const maskName       = document.getElementById('maskName');
-const binsSlider     = document.getElementById('binsSlider');
-const binsVal        = document.getElementById('binsVal');
-const normalizeToggle= document.getElementById('normalizeToggle');
-const btnExtract     = document.getElementById('btnExtract');
-const btnIcon        = document.getElementById('btnIcon');
-const btnLabel       = document.getElementById('btnLabel');
-const btnSpinner     = document.getElementById('btnSpinner');
-const imgPreview     = document.getElementById('imgPreview');
+const fileImage       = document.getElementById('fileImage');
+const fileMask        = document.getElementById('fileMask');
+const imgName         = document.getElementById('imgName');
+const maskName        = document.getElementById('maskName');
+const binsSlider      = document.getElementById('binsSlider');
+const binsVal         = document.getElementById('binsVal');
+const normalizeToggle = document.getElementById('normalizeToggle');
+const btnExtract      = document.getElementById('btnExtract');
+const btnIcon         = document.getElementById('btnIcon');
+const btnLabel        = document.getElementById('btnLabel');
+const btnSpinner      = document.getElementById('btnSpinner');
+const previewCanvas   = document.getElementById('previewCanvas');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
-const imgMeta        = document.getElementById('imgMeta');
-const emptyState     = document.getElementById('emptyState');
-const errorBanner    = document.getElementById('errorBanner');
-const featureGroups  = document.getElementById('featureGroups');
-const downloadBar    = document.getElementById('downloadBar');
-const statFeatures   = document.getElementById('statFeatures');
-const statClasses    = document.getElementById('statClasses');
-const statFinite     = document.getElementById('statFinite');
-const statBins       = document.getElementById('statBins');
-const classGrid      = document.getElementById('classGrid');
+const imgMeta         = document.getElementById('imgMeta');
+const emptyState      = document.getElementById('emptyState');
+const errorBanner     = document.getElementById('errorBanner');
+const featureGroups   = document.getElementById('featureGroups');
+const downloadBar     = document.getElementById('downloadBar');
+const statFeatures    = document.getElementById('statFeatures');
+const statClasses     = document.getElementById('statClasses');
+const statFinite      = document.getElementById('statFinite');
+const statBins        = document.getElementById('statBins');
+const classGrid       = document.getElementById('classGrid');
+const btnAutoSeg      = document.getElementById('btnAutoSeg');
+const segSpinner      = document.getElementById('segSpinner');
+const segBtnLabel     = document.getElementById('segBtnLabel');
+const maskStatus      = document.getElementById('maskStatus');
+const maskStatusText  = document.getElementById('maskStatusText');
+
+// ── Mask tab switching ─────────────────────────────────────────────────────
+function switchMaskTab(tab) {
+  document.getElementById('tabAuto').classList.toggle('active', tab === 'auto');
+  document.getElementById('tabManual').classList.toggle('active', tab === 'manual');
+  document.getElementById('contentAuto').classList.toggle('active', tab === 'auto');
+  document.getElementById('contentManual').classList.toggle('active', tab === 'manual');
+}
 
 // ── File inputs ────────────────────────────────────────────────────────────
 fileImage.addEventListener('change', () => {
@@ -690,6 +870,8 @@ fileImage.addEventListener('change', () => {
   if (!f) return;
   imgName.textContent = f.name;
   btnExtract.disabled = false;
+  btnAutoSeg.disabled = false;
+  updateMaskStatus();
   loadPreview(f);
 });
 
@@ -701,6 +883,7 @@ fileMask.addEventListener('change', () => {
 // Drag-over highlight
 ['dzImage', 'dzMask'].forEach(id => {
   const el = document.getElementById(id);
+  if (!el) return;
   el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('drag-over'); });
   el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
   el.addEventListener('drop', () => el.classList.remove('drag-over'));
@@ -718,6 +901,97 @@ classGrid.querySelectorAll('.class-chip').forEach(chip => {
   });
 });
 
+// ── Mask status helpers ────────────────────────────────────────────────────
+function updateMaskStatus() {
+  if (!fileImage.files[0]) {
+    maskStatus.className = 'mask-status';
+    maskStatusText.textContent = 'No mask — image required';
+    return;
+  }
+  if (autoSegState.session_id) {
+    maskStatus.className = 'mask-status ready';
+    maskStatusText.textContent =
+      `${autoSegState.voxels.toLocaleString()} voxels — TotalSeg`;
+    // Ensure clear button exists
+    if (!document.getElementById('clearMaskBtn')) {
+      const btn = document.createElement('button');
+      btn.className = 'clear-btn';
+      btn.id = 'clearMaskBtn';
+      btn.title = 'Clear mask';
+      btn.textContent = '×';
+      btn.onclick = clearAutoSeg;
+      maskStatus.appendChild(btn);
+    }
+  } else {
+    maskStatus.className = 'mask-status';
+    maskStatusText.textContent = 'Ready to segment';
+    const old = document.getElementById('clearMaskBtn');
+    if (old) old.remove();
+  }
+}
+
+function clearAutoSeg() {
+  autoSegState = { session_id: null, voxels: 0, preview: null };
+  updateMaskStatus();
+  // Re-render plain preview without overlay
+  if (rawPreviewUrl) {
+    renderPlainPreview(rawPreviewUrl);
+  }
+}
+
+// ── Auto-segmentation ──────────────────────────────────────────────────────
+btnAutoSeg.addEventListener('click', async () => {
+  if (!fileImage.files[0]) return;
+
+  const taskVal  = document.getElementById('segTask').value;
+  const speedVal = document.getElementById('segSpeed').value;
+  const fast     = speedVal === 'fast';
+
+  // For 2D images or "body" task, use otsu; otherwise use totalsegmentator
+  const fname   = fileImage.files[0].name.toLowerCase();
+  const is2d    = /\.(png|jpg|jpeg|bmp|tiff?|npy)$/.test(fname);
+  const strategy = (is2d || taskVal === 'body') ? 'otsu' : 'totalsegmentator';
+
+  setSegLoading(true);
+  hideError();
+
+  const fd = new FormData();
+  fd.append('image', fileImage.files[0]);
+  fd.append('strategy', strategy);
+  fd.append('fast', fast ? 'true' : 'false');
+  fd.append('device', 'cpu');
+
+  try {
+    const res = await fetch('/segment', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      showError((data.detail || 'Segmentation failed.'));
+      setSegLoading(false);
+      return;
+    }
+    autoSegState = {
+      session_id: data.session_id,
+      voxels:     data.voxels,
+      preview:    data.preview,
+    };
+    updateMaskStatus();
+    // Show the overlay from the server-returned base64 PNG
+    if (data.preview) {
+      renderBase64Preview(data.preview);
+    }
+  } catch (err) {
+    showError('Segmentation network error: ' + err.message);
+  }
+
+  setSegLoading(false);
+});
+
+function setSegLoading(on) {
+  btnAutoSeg.disabled = on;
+  segSpinner.style.display = on ? 'block' : 'none';
+  segBtnLabel.textContent  = on ? 'Segmenting…' : 'Auto Segment ⚡';
+}
+
 // ── Image preview ──────────────────────────────────────────────────────────
 async function loadPreview(file) {
   const fd = new FormData();
@@ -726,11 +1000,38 @@ async function loadPreview(file) {
     const res = await fetch('/preview', { method: 'POST', body: fd });
     if (!res.ok) return;
     const blob = await res.blob();
-    imgPreview.src = URL.createObjectURL(blob);
-    imgPreview.style.display = 'block';
-    previewPlaceholder.style.display = 'none';
+    const url  = URL.createObjectURL(blob);
+    rawPreviewUrl = url;
+    renderPlainPreview(url);
     imgMeta.textContent = `${file.name}  ·  ${(file.size / 1024).toFixed(1)} KB`;
   } catch (_) { /* preview is optional */ }
+}
+
+function renderPlainPreview(url) {
+  const img = new Image();
+  img.onload = () => {
+    previewCanvas.width  = img.naturalWidth;
+    previewCanvas.height = img.naturalHeight;
+    const ctx = previewCanvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    previewCanvas.style.display = 'block';
+    previewPlaceholder.style.display = 'none';
+  };
+  img.src = url;
+}
+
+function renderBase64Preview(b64) {
+  const url = 'data:image/png;base64,' + b64;
+  const img = new Image();
+  img.onload = () => {
+    previewCanvas.width  = img.naturalWidth;
+    previewCanvas.height = img.naturalHeight;
+    const ctx = previewCanvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    previewCanvas.style.display = 'block';
+    previewPlaceholder.style.display = 'none';
+  };
+  img.src = url;
 }
 
 // ── Extract ────────────────────────────────────────────────────────────────
@@ -755,7 +1056,12 @@ btnExtract.addEventListener('click', async () => {
 
   const fd = new FormData();
   fd.append('image', fileImage.files[0]);
-  if (fileMask.files[0]) fd.append('mask', fileMask.files[0]);
+  // Use manual mask upload if provided; otherwise rely on session_id
+  if (fileMask.files[0]) {
+    fd.append('mask', fileMask.files[0]);
+  } else if (autoSegState.session_id) {
+    fd.append('session_id', autoSegState.session_id);
+  }
   fd.append('bins', binsSlider.value);
   fd.append('normalize', normalizeToggle.checked);
   fd.append('feature_classes', classes.join(','));
