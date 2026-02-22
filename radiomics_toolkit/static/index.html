@@ -366,13 +366,174 @@
   }
 
   .top-strip {
-    display: grid;
-    grid-template-columns: 220px 1fr;
-    gap: 16px;
     padding: 16px;
     border-bottom: 1px solid var(--border);
     flex-shrink: 0;
   }
+
+  /* Normal (non-viewer) layout inside top-strip */
+  .normal-view {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    gap: 16px;
+  }
+
+  /* Viewer mode overrides */
+  .top-strip.viewer-mode {
+    padding: 0;
+    height: 460px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── DICOM Viewer ─────────────────────────────────────────── */
+  .dicom-viewer-panel {
+    display: none;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .viewer-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 12px;
+    background: var(--surface);
+    flex-shrink: 0;
+  }
+
+  .viewer-top-bar { border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .viewer-bottom-bar { border-top: 1px solid var(--border); }
+
+  .viewer-series-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 200px;
+  }
+
+  .viewer-meta-text { font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .viewer-sep { color: var(--border); flex-shrink: 0; }
+
+  .wl-label {
+    font-size: 11px;
+    color: var(--muted);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    white-space: nowrap;
+  }
+
+  .wl-input {
+    width: 58px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 12px;
+    padding: 3px 5px;
+    text-align: center;
+  }
+  .wl-input:focus { outline: none; border-color: var(--accent); }
+
+  .viewer-canvas-wrap {
+    flex: 1;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    position: relative;
+    cursor: crosshair;
+    user-select: none;
+  }
+
+  #dicomCanvas {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    image-rendering: pixelated;
+  }
+
+  .viewer-overlay-text {
+    position: absolute;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: rgba(255,255,255,.7);
+    pointer-events: none;
+  }
+  .overlay-tl { top: 8px; left: 10px; }
+  .overlay-tr { top: 8px; right: 10px; text-align: right; }
+  .overlay-bl { bottom: 8px; left: 10px; }
+  .overlay-br { bottom: 8px; right: 10px; text-align: right; }
+
+  .viewer-loading-mask {
+    position: absolute;
+    inset: 0;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,.45);
+  }
+  .viewer-loading-mask.active { display: flex; }
+  .viewer-loading-dot {
+    width: 10px; height: 10px;
+    border: 2px solid rgba(255,255,255,.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin .6s linear infinite;
+  }
+
+  .viewer-btn {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 3px 9px;
+    cursor: pointer;
+    font-size: 13px;
+    flex-shrink: 0;
+    transition: border-color .15s;
+  }
+  .viewer-btn:hover { border-color: var(--accent); }
+
+  .slice-label {
+    font-size: 12px;
+    color: var(--muted);
+    min-width: 64px;
+    text-align: right;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  #sliceSlider { flex: 1; accent-color: var(--accent); }
+
+  .viewer-hint {
+    font-size: 10px;
+    color: var(--muted);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+
+  /* W/L preset select (reuse seg-select style) */
+  .wl-preset-select {
+    padding: 4px 20px 4px 7px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-size: 11px;
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath fill='%237a8299' d='M0 0l4 5 4-5z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 6px center;
+  }
+  .wl-preset-select:focus { outline: none; border-color: var(--accent); }
 
   /* Image preview */
   .preview-card {
@@ -772,42 +933,93 @@
   <!-- Right main area -->
   <div class="main">
 
-    <!-- Top strip: preview + stat cards -->
-    <div class="top-strip">
+    <!-- Top strip: preview + stat cards  OR  DICOM viewer -->
+    <div class="top-strip" id="topStrip">
 
-      <div class="preview-card">
-        <div class="card-head">Preview</div>
-        <div class="img-wrap">
-          <canvas id="previewCanvas"></canvas>
-          <div class="placeholder" id="previewPlaceholder">No image loaded</div>
-        </div>
-        <div class="img-meta" id="imgMeta"></div>
-      </div>
+      <!-- ── Normal mode ─────────────────────────────────────── -->
+      <div class="normal-view" id="normalView">
 
-      <div class="stats-strip" id="statsStrip">
-        <div class="stat-card">
-          <div class="stat-label">Features</div>
-          <div class="stat-value" id="statFeatures">—</div>
-          <div class="stat-sub">extracted</div>
+        <div class="preview-card">
+          <div class="card-head">Preview</div>
+          <div class="img-wrap">
+            <canvas id="previewCanvas"></canvas>
+            <div class="placeholder" id="previewPlaceholder">No image loaded</div>
+          </div>
+          <div class="img-meta" id="imgMeta"></div>
         </div>
-        <div class="stat-card">
-          <div class="stat-label">Classes</div>
-          <div class="stat-value" id="statClasses">—</div>
-          <div class="stat-sub">active</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Finite</div>
-          <div class="stat-value" id="statFinite">—</div>
-          <div class="stat-sub">values</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Bins</div>
-          <div class="stat-value" id="statBins">—</div>
-          <div class="stat-sub">grey levels</div>
-        </div>
-      </div>
 
-    </div>
+        <div class="stats-strip" id="statsStrip">
+          <div class="stat-card">
+            <div class="stat-label">Features</div>
+            <div class="stat-value" id="statFeatures">—</div>
+            <div class="stat-sub">extracted</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Classes</div>
+            <div class="stat-value" id="statClasses">—</div>
+            <div class="stat-sub">active</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Finite</div>
+            <div class="stat-value" id="statFinite">—</div>
+            <div class="stat-sub">values</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Bins</div>
+            <div class="stat-value" id="statBins">—</div>
+            <div class="stat-sub">grey levels</div>
+          </div>
+        </div>
+
+      </div><!-- /#normalView -->
+
+      <!-- ── DICOM viewer mode ───────────────────────────────── -->
+      <div class="dicom-viewer-panel" id="dicomViewerPanel">
+
+        <!-- Controls bar -->
+        <div class="viewer-bar viewer-top-bar">
+          <span class="viewer-series-label" id="viewerSeriesLabel">—</span>
+          <span class="viewer-sep">·</span>
+          <span class="viewer-meta-text" id="viewerMetaText">—</span>
+          <div style="flex:1; min-width:8px"></div>
+          <select class="wl-preset-select" id="wlPreset">
+            <option value="abdomen">Abdomen</option>
+            <option value="lung">Lung</option>
+            <option value="bone">Bone</option>
+            <option value="brain">Brain</option>
+            <option value="soft">Soft tissue</option>
+            <option value="custom">Custom</option>
+          </select>
+          <label class="wl-label">C <input class="wl-input" type="number" id="wcInput" value="40" /></label>
+          <label class="wl-label">W <input class="wl-input" type="number" id="wwInput" value="400" /></label>
+        </div>
+
+        <!-- Canvas -->
+        <div class="viewer-canvas-wrap" id="viewerCanvasWrap">
+          <canvas id="dicomCanvas"></canvas>
+          <!-- Corner overlays -->
+          <div class="viewer-overlay-text overlay-tl" id="overlayTL"></div>
+          <div class="viewer-overlay-text overlay-tr" id="overlayTR"></div>
+          <div class="viewer-overlay-text overlay-bl" id="overlayBL"></div>
+          <div class="viewer-overlay-text overlay-br" id="overlayBR"></div>
+          <!-- Loading indicator -->
+          <div class="viewer-loading-mask" id="viewerLoadingMask">
+            <div class="viewer-loading-dot"></div>
+          </div>
+        </div>
+
+        <!-- Slice slider bar -->
+        <div class="viewer-bar viewer-bottom-bar">
+          <button class="viewer-btn" id="btnPrevSlice">◀</button>
+          <input type="range" id="sliceSlider" min="0" max="0" value="0" step="1" />
+          <button class="viewer-btn" id="btnNextSlice">▶</button>
+          <span class="slice-label" id="sliceLabel">— / —</span>
+          <span class="viewer-hint">Scroll · drag C/W · ↑↓ keys</span>
+        </div>
+
+      </div><!-- /#dicomViewerPanel -->
+
+    </div><!-- /#topStrip -->
 
     <!-- Results -->
     <div class="results-panel" id="resultsPanel">
@@ -836,9 +1048,26 @@ let lastResults   = null;
 let autoSegState  = { session_id: null, voxels: 0, preview: null };
 let rawPreviewUrl = null;
 
-// Image source: either a single File or an array of DICOM File objects
-let imageFile      = null;   // single File
-let dicomFiles     = null;   // File[] when a DICOM directory is loaded
+// Image source
+let imageFile  = null;   // single File
+let dicomFiles = null;   // File[] when a DICOM directory is loaded
+
+// DICOM viewer
+let dicomSession     = null;  // metadata from /dicom/session
+let currentSliceIdx  = 0;
+let viewerWC         = 40;
+let viewerWW         = 400;
+let sliceTimer       = null;
+let isDraggingWL     = false;
+let wlDrag           = { x: 0, y: 0, wc: 0, ww: 0 };
+
+const WL_PRESETS = {
+  abdomen: { wc:  40,   ww:  400 },
+  lung:    { wc: -600,  ww: 1500 },
+  bone:    { wc:  400,  ww: 1800 },
+  brain:   { wc:  40,   ww:   80 },
+  soft:    { wc:  50,   ww:  350 },
+};
 
 const CLASS_COLORS = {
   firstorder: '#5b8dee', shape: '#7c5ce0', glcm: '#00cec9',
@@ -846,38 +1075,50 @@ const CLASS_COLORS = {
 };
 
 // ── DOM refs ───────────────────────────────────────────────────────────────
-const fileImage        = document.getElementById('fileImage');
-const fileDicomDir     = document.getElementById('fileDicomDir');
-const btnUploadFolder  = document.getElementById('btnUploadFolder');
-const fileMask         = document.getElementById('fileMask');
-const imgName          = document.getElementById('imgName');
-const dzImageLabel     = document.getElementById('dzImageLabel');
-const maskName         = document.getElementById('maskName');
-const binsSlider       = document.getElementById('binsSlider');
-const binsVal          = document.getElementById('binsVal');
-const normalizeToggle  = document.getElementById('normalizeToggle');
-const btnExtract       = document.getElementById('btnExtract');
-const btnIcon          = document.getElementById('btnIcon');
-const btnLabel         = document.getElementById('btnLabel');
-const btnSpinner       = document.getElementById('btnSpinner');
-const previewCanvas    = document.getElementById('previewCanvas');
+const fileImage          = document.getElementById('fileImage');
+const fileDicomDir       = document.getElementById('fileDicomDir');
+const btnUploadFolder    = document.getElementById('btnUploadFolder');
+const fileMask           = document.getElementById('fileMask');
+const imgName            = document.getElementById('imgName');
+const dzImageLabel       = document.getElementById('dzImageLabel');
+const maskName           = document.getElementById('maskName');
+const binsSlider         = document.getElementById('binsSlider');
+const binsVal            = document.getElementById('binsVal');
+const normalizeToggle    = document.getElementById('normalizeToggle');
+const btnExtract         = document.getElementById('btnExtract');
+const btnIcon            = document.getElementById('btnIcon');
+const btnLabel           = document.getElementById('btnLabel');
+const btnSpinner         = document.getElementById('btnSpinner');
+const previewCanvas      = document.getElementById('previewCanvas');
 const previewPlaceholder = document.getElementById('previewPlaceholder');
-const imgMeta          = document.getElementById('imgMeta');
-const emptyState       = document.getElementById('emptyState');
-const errorBanner      = document.getElementById('errorBanner');
-const featureGroups    = document.getElementById('featureGroups');
-const downloadBar      = document.getElementById('downloadBar');
-const statFeatures     = document.getElementById('statFeatures');
-const statClasses      = document.getElementById('statClasses');
-const statFinite       = document.getElementById('statFinite');
-const statBins         = document.getElementById('statBins');
-const classGrid        = document.getElementById('classGrid');
-const btnAutoSeg       = document.getElementById('btnAutoSeg');
-const segSpinner       = document.getElementById('segSpinner');
-const segBtnLabel      = document.getElementById('segBtnLabel');
-const maskStatus       = document.getElementById('maskStatus');
-const maskStatusText   = document.getElementById('maskStatusText');
-const dzImage          = document.getElementById('dzImage');
+const imgMeta            = document.getElementById('imgMeta');
+const emptyState         = document.getElementById('emptyState');
+const errorBanner        = document.getElementById('errorBanner');
+const featureGroups      = document.getElementById('featureGroups');
+const downloadBar        = document.getElementById('downloadBar');
+const statFeatures       = document.getElementById('statFeatures');
+const statClasses        = document.getElementById('statClasses');
+const statFinite         = document.getElementById('statFinite');
+const statBins           = document.getElementById('statBins');
+const classGrid          = document.getElementById('classGrid');
+const btnAutoSeg         = document.getElementById('btnAutoSeg');
+const segSpinner         = document.getElementById('segSpinner');
+const segBtnLabel        = document.getElementById('segBtnLabel');
+const maskStatus         = document.getElementById('maskStatus');
+const maskStatusText     = document.getElementById('maskStatusText');
+const dzImage            = document.getElementById('dzImage');
+// Viewer elements
+const topStrip           = document.getElementById('topStrip');
+const normalView         = document.getElementById('normalView');
+const dicomViewerPanel   = document.getElementById('dicomViewerPanel');
+const dicomCanvas        = document.getElementById('dicomCanvas');
+const viewerCanvasWrap   = document.getElementById('viewerCanvasWrap');
+const viewerLoadingMask  = document.getElementById('viewerLoadingMask');
+const sliceSlider        = document.getElementById('sliceSlider');
+const sliceLabel         = document.getElementById('sliceLabel');
+const wcInput            = document.getElementById('wcInput');
+const wwInput            = document.getElementById('wwInput');
+const wlPreset           = document.getElementById('wlPreset');
 
 // ── Image helpers ──────────────────────────────────────────────────────────
 function hasImage() { return imageFile || (dicomFiles && dicomFiles.length > 0); }
@@ -895,16 +1136,18 @@ function appendImageToForm(fd) {
 function handleSingleFile(file) {
   imageFile  = file;
   dicomFiles = null;
-  imgName.textContent = file.name;
+  imgName.textContent      = file.name;
   dzImageLabel.textContent = 'Drop file or folder · or click to browse';
   btnExtract.disabled = false;
   btnAutoSeg.disabled = false;
   updateMaskStatus();
+  // If viewer was active, switch back to normal preview mode
+  if (dicomSession) deactivateDicomViewer();
   loadPreviewSingle(file);
 }
 
 /** Handle a DICOM directory (from webkitdirectory input or folder drop). */
-function handleDicomDirectory(files, dirName) {
+async function handleDicomDirectory(files, dirName) {
   const dcmFiles = Array.from(files).filter(f =>
     f.name.toLowerCase().endsWith('.dcm')
   );
@@ -916,12 +1159,14 @@ function handleDicomDirectory(files, dirName) {
   dicomFiles = dcmFiles;
 
   const totalKB = (dcmFiles.reduce((s, f) => s + f.size, 0) / 1024).toFixed(0);
-  imgName.textContent = `${dirName}/ (${dcmFiles.length} slices)`;
+  imgName.textContent  = `${dirName}/ (${dcmFiles.length} slices)`;
   dzImageLabel.textContent = 'DICOM folder loaded';
-  btnExtract.disabled = false;
-  btnAutoSeg.disabled = false;
+  btnExtract.disabled  = false;
+  btnAutoSeg.disabled  = false;
   updateMaskStatus();
-  loadPreviewDicom(dcmFiles, dirName, totalKB);
+
+  // Create a DICOM viewer session
+  await initDicomViewer(dcmFiles, dirName, totalKB);
 }
 
 // ── Single-file input ──────────────────────────────────────────────────────
@@ -1058,6 +1303,204 @@ function clearAutoSeg() {
   if (rawPreviewUrl) renderPlainPreview(rawPreviewUrl);
 }
 
+// ── DICOM Viewer ───────────────────────────────────────────────────────────
+
+async function initDicomViewer(files, dirName, totalKB) {
+  // Show loading state in the drop zone while uploading
+  imgName.textContent = `Uploading ${files.length} slices…`;
+
+  try {
+    const fd = new FormData();
+    for (const f of files) fd.append('dicom_files', f);
+
+    const res = await fetch('/dicom/session', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json();
+      showError('DICOM session error: ' + (err.detail || res.statusText));
+      imgName.textContent = `${dirName}/ (${files.length} slices)`;
+      return;
+    }
+    const session = await res.json();
+    imgName.textContent = `${dirName}/ (${session.slice_count} slices)`;
+    activateDicomViewer(session);
+  } catch (e) {
+    showError('Failed to create DICOM session: ' + e.message);
+    imgName.textContent = `${dirName}/ (${files.length} slices)`;
+  }
+}
+
+function activateDicomViewer(session) {
+  dicomSession    = session;
+  viewerWC        = session.default_wc;
+  viewerWW        = session.default_ww;
+  currentSliceIdx = Math.floor(session.slice_count / 2);
+
+  // Populate controls
+  const desc = session.study_description || session.series_description || 'DICOM Series';
+  document.getElementById('viewerSeriesLabel').textContent = desc;
+  document.getElementById('viewerMetaText').textContent =
+    `${session.slice_count} slices · ${session.cols}×${session.rows} · ` +
+    `${session.pixel_spacing[0]}×${session.pixel_spacing[1]}×${session.slice_thickness} mm`;
+
+  wcInput.value = Math.round(viewerWC);
+  wwInput.value = Math.round(viewerWW);
+
+  // Match preset
+  const matched = Object.entries(WL_PRESETS).find(
+    ([, p]) => Math.abs(p.wc - viewerWC) < 5 && Math.abs(p.ww - viewerWW) < 10
+  );
+  wlPreset.value = matched ? matched[0] : 'custom';
+
+  sliceSlider.max   = session.slice_count - 1;
+  sliceSlider.value = currentSliceIdx;
+
+  // Switch to viewer mode
+  normalView.style.display       = 'none';
+  dicomViewerPanel.style.display = 'flex';
+  topStrip.classList.add('viewer-mode');
+
+  loadSlice(currentSliceIdx);
+}
+
+function deactivateDicomViewer() {
+  dicomSession = null;
+  dicomViewerPanel.style.display = 'none';
+  normalView.style.display       = '';
+  topStrip.classList.remove('viewer-mode');
+}
+
+function updateViewerOverlays() {
+  if (!dicomSession) return;
+  document.getElementById('overlayTL').textContent =
+    dicomSession.study_description || dicomSession.series_description || '';
+  document.getElementById('overlayTR').textContent =
+    `C: ${Math.round(viewerWC)}  W: ${Math.round(viewerWW)}`;
+  document.getElementById('overlayBL').textContent =
+    `${dicomSession.cols}×${dicomSession.rows}  ·  ` +
+    `${dicomSession.pixel_spacing[0]}×${dicomSession.pixel_spacing[1]}×${dicomSession.slice_thickness} mm`;
+  document.getElementById('overlayBR').textContent =
+    `${currentSliceIdx + 1} / ${dicomSession.slice_count}`;
+}
+
+async function loadSlice(index) {
+  if (!dicomSession) return;
+  viewerLoadingMask.classList.add('active');
+
+  const url = `/dicom/${dicomSession.session_id}/${index}?wc=${viewerWC}&ww=${viewerWW}`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return;
+    const blob   = await res.blob();
+    const imgUrl = URL.createObjectURL(blob);
+    const img    = new Image();
+    img.onload = () => {
+      dicomCanvas.width  = img.naturalWidth;
+      dicomCanvas.height = img.naturalHeight;
+      dicomCanvas.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(imgUrl);
+      viewerLoadingMask.classList.remove('active');
+      currentSliceIdx = index;
+      updateSliceUI(index);
+      updateViewerOverlays();
+    };
+    img.src = imgUrl;
+  } catch (_) {
+    viewerLoadingMask.classList.remove('active');
+  }
+}
+
+function updateSliceUI(index) {
+  sliceSlider.value  = index;
+  sliceLabel.textContent = `${index + 1} / ${dicomSession.slice_count}`;
+}
+
+function scheduleSlice(index) {
+  index = Math.max(0, Math.min(index, dicomSession.slice_count - 1));
+  updateSliceUI(index);
+  clearTimeout(sliceTimer);
+  sliceTimer = setTimeout(() => loadSlice(index), 55);
+}
+
+// ── Viewer controls ────────────────────────────────────────────────────────
+
+sliceSlider.addEventListener('input', () => {
+  if (!dicomSession) return;
+  scheduleSlice(parseInt(sliceSlider.value));
+});
+
+document.getElementById('btnPrevSlice').addEventListener('click', () => {
+  if (!dicomSession) return;
+  scheduleSlice(currentSliceIdx - 1);
+});
+
+document.getElementById('btnNextSlice').addEventListener('click', () => {
+  if (!dicomSession) return;
+  scheduleSlice(currentSliceIdx + 1);
+});
+
+// Scroll wheel on canvas → navigate slices
+viewerCanvasWrap.addEventListener('wheel', e => {
+  if (!dicomSession) return;
+  e.preventDefault();
+  scheduleSlice(currentSliceIdx + (e.deltaY > 0 ? 1 : -1));
+}, { passive: false });
+
+// Keyboard navigation (arrow keys, only when viewer active)
+document.addEventListener('keydown', e => {
+  if (!dicomSession) return;
+  if (document.activeElement.tagName === 'INPUT') return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowRight') { e.preventDefault(); scheduleSlice(currentSliceIdx + 1); }
+  if (e.key === 'ArrowUp'   || e.key === 'ArrowLeft')  { e.preventDefault(); scheduleSlice(currentSliceIdx - 1); }
+  if (e.key === 'Home') { e.preventDefault(); scheduleSlice(0); }
+  if (e.key === 'End')  { e.preventDefault(); scheduleSlice(dicomSession.slice_count - 1); }
+});
+
+// Click-drag on canvas: horizontal → WW, vertical → WC
+viewerCanvasWrap.addEventListener('mousedown', e => {
+  if (e.button !== 0) return;
+  isDraggingWL = true;
+  wlDrag = { x: e.clientX, y: e.clientY, wc: viewerWC, ww: viewerWW };
+  e.preventDefault();
+});
+
+document.addEventListener('mousemove', e => {
+  if (!isDraggingWL || !dicomSession) return;
+  const dx =  (e.clientX - wlDrag.x);        // right  → wider WW
+  const dy = -(e.clientY - wlDrag.y);         // up     → higher WC
+  viewerWW = Math.max(1, Math.round(wlDrag.ww + dx * 5));
+  viewerWC = Math.round(wlDrag.wc + dy * 2);
+  wcInput.value  = viewerWC;
+  wwInput.value  = viewerWW;
+  wlPreset.value = 'custom';
+  scheduleSlice(currentSliceIdx);
+});
+
+document.addEventListener('mouseup', () => { isDraggingWL = false; });
+
+// W/L preset selector
+wlPreset.addEventListener('change', () => {
+  const preset = WL_PRESETS[wlPreset.value];
+  if (!preset) return;
+  viewerWC = preset.wc;
+  viewerWW = preset.ww;
+  wcInput.value = viewerWC;
+  wwInput.value = viewerWW;
+  if (dicomSession) scheduleSlice(currentSliceIdx);
+});
+
+// Manual WC/WW input
+function applyWLInputs() {
+  const newWC = parseFloat(wcInput.value);
+  const newWW = parseFloat(wwInput.value);
+  if (isNaN(newWC) || isNaN(newWW) || newWW < 1) return;
+  viewerWC = newWC;
+  viewerWW = newWW;
+  wlPreset.value = 'custom';
+  if (dicomSession) scheduleSlice(currentSliceIdx);
+}
+wcInput.addEventListener('change', applyWLInputs);
+wwInput.addEventListener('change', applyWLInputs);
+
 // ── Preview ────────────────────────────────────────────────────────────────
 async function loadPreviewSingle(file) {
   const fd = new FormData();
@@ -1072,21 +1515,6 @@ async function loadPreviewSingle(file) {
   } catch (_) {}
 }
 
-async function loadPreviewDicom(files, dirName, totalKB) {
-  // Send middle slice as a single DICOM for preview
-  const sorted = [...files].sort((a, b) => a.name.localeCompare(b.name));
-  const mid    = sorted[Math.floor(sorted.length / 2)];
-  const fd     = new FormData();
-  fd.append('image', mid);
-  try {
-    const res = await fetch('/preview', { method: 'POST', body: fd });
-    if (!res.ok) return;
-    const url = URL.createObjectURL(await res.blob());
-    rawPreviewUrl = url;
-    renderPlainPreview(url);
-    imgMeta.textContent = `${dirName}/  ·  ${files.length} slices  ·  ${totalKB} KB total`;
-  } catch (_) {}
-}
 
 function renderPlainPreview(url) {
   const img = new Image();

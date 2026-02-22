@@ -34,6 +34,9 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 # ---------------------------------------------------------------------------
 _sessions: dict[str, Path] = {}
 
+# DICOM viewer sessions: session_id → sorted list of .dcm Paths
+_dicom_sessions: dict[str, list[Path]] = {}
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -305,6 +308,127 @@ async def extract(
             clean[k] = None
 
     return JSONResponse(content=clean)
+
+
+# ---------------------------------------------------------------------------
+# DICOM viewer endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/dicom/session")
+async def create_dicom_session(dicom_files: List[UploadFile] = File(...)):
+    """Upload a DICOM series and create a viewer session.
+
+    Returns metadata (slice count, matrix size, pixel spacing, default W/L)
+    and a ``session_id`` used to fetch individual slices.
+    """
+    import pydicom
+
+    if not dicom_files:
+        raise HTTPException(status_code=422, detail="No DICOM files provided.")
+
+    session_dir = Path(tempfile.mkdtemp())
+    sid = str(uuid.uuid4())
+
+    # Save all files
+    saved: list[Path] = []
+    for f in dicom_files:
+        fname = Path(f.filename).name if f.filename else f"{uuid.uuid4().hex}.dcm"
+        p = session_dir / fname
+        p.write_bytes(await f.read())
+        saved.append(p)
+
+    # Sort by InstanceNumber
+    def _instance_num(path: Path) -> int:
+        try:
+            ds = pydicom.dcmread(str(path), stop_before_pixels=True)
+            return int(getattr(ds, "InstanceNumber", 0))
+        except Exception:
+            return 0
+
+    saved.sort(key=_instance_num)
+    _dicom_sessions[sid] = saved
+
+    # Read metadata from the first slice
+    rows, cols = 512, 512
+    pixel_spacing = [1.0, 1.0]
+    slice_thickness = 1.0
+    wc, ww = 40.0, 400.0
+    study_desc = series_desc = ""
+
+    try:
+        ds = pydicom.dcmread(str(saved[0]), stop_before_pixels=True)
+        rows = int(getattr(ds, "Rows", 512))
+        cols = int(getattr(ds, "Columns", 512))
+        ps = getattr(ds, "PixelSpacing", [1.0, 1.0])
+        pixel_spacing = [float(ps[0]), float(ps[1])]
+        slice_thickness = float(getattr(ds, "SliceThickness", 1.0))
+        study_desc  = str(getattr(ds, "StudyDescription", ""))
+        series_desc = str(getattr(ds, "SeriesDescription", ""))
+
+        raw_wc = getattr(ds, "WindowCenter", 40)
+        raw_ww = getattr(ds, "WindowWidth", 400)
+        # Tags can be multi-value sequences
+        wc = float(raw_wc[0] if hasattr(raw_wc, "__iter__") and not isinstance(raw_wc, str) else raw_wc)
+        ww = float(raw_ww[0] if hasattr(raw_ww, "__iter__") and not isinstance(raw_ww, str) else raw_ww)
+    except Exception:
+        pass
+
+    return JSONResponse(content={
+        "session_id":        sid,
+        "slice_count":       len(saved),
+        "rows":              rows,
+        "cols":              cols,
+        "pixel_spacing":     pixel_spacing,
+        "slice_thickness":   slice_thickness,
+        "default_wc":        wc,
+        "default_ww":        ww,
+        "study_description": study_desc,
+        "series_description": series_desc,
+    })
+
+
+@app.get("/dicom/{session_id}/{index}")
+async def get_dicom_slice(
+    session_id: str,
+    index: int,
+    wc: float = 40.0,
+    ww: float = 400.0,
+):
+    """Return a single DICOM slice as a windowed greyscale PNG.
+
+    Query params ``wc`` (window centre) and ``ww`` (window width) control
+    the Hounsfield display range.
+    """
+    import pydicom
+    from PIL import Image as PILImage
+
+    if session_id not in _dicom_sessions:
+        raise HTTPException(status_code=404, detail="DICOM session not found.")
+
+    slices = _dicom_sessions[session_id]
+    if index < 0 or index >= len(slices):
+        raise HTTPException(status_code=404, detail=f"Slice index {index} out of range (0–{len(slices)-1}).")
+
+    try:
+        ds  = pydicom.dcmread(str(slices[index]))
+        arr = ds.pixel_array.astype(np.float64)
+        slope     = float(getattr(ds, "RescaleSlope", 1.0))
+        intercept = float(getattr(ds, "RescaleIntercept", 0.0))
+        arr = arr * slope + intercept
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail=f"Cannot read slice: {exc}")
+
+    # Apply window / level
+    lo = wc - ww / 2.0
+    hi = wc + ww / 2.0
+    arr = np.clip(arr, lo, hi)
+    arr = (arr - lo) / (hi - lo) * 255.0
+
+    img = PILImage.fromarray(arr.astype(np.uint8), mode="L")
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    return StreamingResponse(buf, media_type="image/png")
 
 
 # ---------------------------------------------------------------------------
