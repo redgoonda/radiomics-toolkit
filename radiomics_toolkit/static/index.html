@@ -535,6 +535,14 @@
   }
   .wl-preset-select:focus { outline: none; border-color: var(--accent); }
 
+  .mask-toggle-btn { white-space: nowrap; }
+  .mask-toggle-btn.active {
+    background: rgba(91,141,238,.2);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .mask-toggle-btn:disabled { opacity: .35; cursor: not-allowed; }
+
   /* Image preview */
   .preview-card {
     background: var(--surface2);
@@ -992,6 +1000,9 @@
           </select>
           <label class="wl-label">C <input class="wl-input" type="number" id="wcInput" value="40" /></label>
           <label class="wl-label">W <input class="wl-input" type="number" id="wwInput" value="400" /></label>
+          <button class="viewer-btn mask-toggle-btn" id="btnMaskOverlay" title="Toggle segmentation overlay" disabled>
+            Mask ◉
+          </button>
         </div>
 
         <!-- Canvas -->
@@ -1060,6 +1071,7 @@ let viewerWW         = 400;
 let sliceTimer       = null;
 let isDraggingWL     = false;
 let wlDrag           = { x: 0, y: 0, wc: 0, ww: 0 };
+let maskOverlayOn    = false;
 
 const WL_PRESETS = {
   abdomen: { wc:  40,   ww:  400 },
@@ -1119,6 +1131,7 @@ const sliceLabel         = document.getElementById('sliceLabel');
 const wcInput            = document.getElementById('wcInput');
 const wwInput            = document.getElementById('wwInput');
 const wlPreset           = document.getElementById('wlPreset');
+const btnMaskOverlay     = document.getElementById('btnMaskOverlay');
 
 // ── Image helpers ──────────────────────────────────────────────────────────
 function hasImage() { return imageFile || (dicomFiles && dicomFiles.length > 0); }
@@ -1277,6 +1290,7 @@ function updateMaskStatus() {
   if (!hasImage()) {
     maskStatus.className = 'mask-status';
     maskStatusText.textContent = 'No mask — image required';
+    btnMaskOverlay.disabled = true;
     return;
   }
   if (autoSegState.session_id) {
@@ -1289,11 +1303,18 @@ function updateMaskStatus() {
       btn.onclick = clearAutoSeg;
       maskStatus.appendChild(btn);
     }
+    // Enable mask overlay button in DICOM viewer
+    btnMaskOverlay.disabled = !dicomSession;
   } else {
     maskStatus.className = 'mask-status';
     maskStatusText.textContent = 'Ready to segment';
     const old = document.getElementById('clearMaskBtn');
     if (old) old.remove();
+    // Disable and reset overlay toggle
+    btnMaskOverlay.disabled = true;
+    maskOverlayOn = false;
+    btnMaskOverlay.classList.remove('active');
+    btnMaskOverlay.textContent = 'Mask ◉';
   }
 }
 
@@ -1359,11 +1380,18 @@ function activateDicomViewer(session) {
   dicomViewerPanel.style.display = 'flex';
   topStrip.classList.add('viewer-mode');
 
+  // Enable mask toggle if a seg session already exists
+  btnMaskOverlay.disabled = !autoSegState.session_id;
+
   loadSlice(currentSliceIdx);
 }
 
 function deactivateDicomViewer() {
   dicomSession = null;
+  maskOverlayOn = false;
+  btnMaskOverlay.disabled = true;
+  btnMaskOverlay.classList.remove('active');
+  btnMaskOverlay.textContent = 'Mask ◉';
   dicomViewerPanel.style.display = 'none';
   normalView.style.display       = '';
   topStrip.classList.remove('viewer-mode');
@@ -1386,7 +1414,10 @@ async function loadSlice(index) {
   if (!dicomSession) return;
   viewerLoadingMask.classList.add('active');
 
-  const url = `/dicom/${dicomSession.session_id}/${index}?wc=${viewerWC}&ww=${viewerWW}`;
+  let url = `/dicom/${dicomSession.session_id}/${index}?wc=${viewerWC}&ww=${viewerWW}`;
+  if (maskOverlayOn && autoSegState.session_id) {
+    url += `&mask_session=${autoSegState.session_id}`;
+  }
   try {
     const res = await fetch(url);
     if (!res.ok) return;
@@ -1486,6 +1517,15 @@ wlPreset.addEventListener('change', () => {
   wcInput.value = viewerWC;
   wwInput.value = viewerWW;
   if (dicomSession) scheduleSlice(currentSliceIdx);
+});
+
+// Mask overlay toggle
+btnMaskOverlay.addEventListener('click', () => {
+  if (!dicomSession || !autoSegState.session_id) return;
+  maskOverlayOn = !maskOverlayOn;
+  btnMaskOverlay.classList.toggle('active', maskOverlayOn);
+  btnMaskOverlay.textContent = maskOverlayOn ? 'Mask ◉ On' : 'Mask ◉';
+  loadSlice(currentSliceIdx);
 });
 
 // Manual WC/WW input

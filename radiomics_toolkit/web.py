@@ -393,11 +393,14 @@ async def get_dicom_slice(
     index: int,
     wc: float = 40.0,
     ww: float = 400.0,
+    mask_session: str = "",
 ):
-    """Return a single DICOM slice as a windowed greyscale PNG.
+    """Return a single DICOM slice as a windowed PNG.
 
-    Query params ``wc`` (window centre) and ``ww`` (window width) control
-    the Hounsfield display range.
+    Query params:
+      ``wc``           Window centre (HU).
+      ``ww``           Window width (HU).
+      ``mask_session`` Optional seg session_id — overlays the mask in blue.
     """
     import pydicom
     from PIL import Image as PILImage
@@ -418,13 +421,33 @@ async def get_dicom_slice(
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Cannot read slice: {exc}")
 
-    # Apply window / level
+    # Apply window / level → 0–255
     lo = wc - ww / 2.0
     hi = wc + ww / 2.0
     arr = np.clip(arr, lo, hi)
     arr = (arr - lo) / (hi - lo) * 255.0
 
-    img = PILImage.fromarray(arr.astype(np.uint8), mode="L")
+    # Build RGBA canvas
+    grey = arr.astype(np.uint8)
+    rgba = np.stack([grey, grey, grey, np.full_like(grey, 255)], axis=-1)
+
+    # Overlay segmentation mask if requested
+    if mask_session and mask_session in _sessions:
+        mask_path = _sessions[mask_session]
+        if mask_path.exists():
+            full_mask = np.load(str(mask_path))
+            mask_slice: np.ndarray | None = None
+            if full_mask.ndim == 3 and index < full_mask.shape[0]:
+                mask_slice = full_mask[index]
+            elif full_mask.ndim == 2:
+                mask_slice = full_mask
+            if mask_slice is not None:
+                m = mask_slice > 0
+                rgba[m, 0] = np.clip(rgba[m, 0].astype(int) * 60 // 100 + 91  * 40 // 100, 0, 255).astype(np.uint8)
+                rgba[m, 1] = np.clip(rgba[m, 1].astype(int) * 60 // 100 + 141 * 40 // 100, 0, 255).astype(np.uint8)
+                rgba[m, 2] = np.clip(rgba[m, 2].astype(int) * 60 // 100 + 238 * 40 // 100, 0, 255).astype(np.uint8)
+
+    img = PILImage.fromarray(rgba, mode="RGBA")
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     buf.seek(0)
